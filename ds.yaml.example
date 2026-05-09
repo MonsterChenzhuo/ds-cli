@@ -1,0 +1,36 @@
+cluster:
+  name: dolphinscheduler-pseudo
+  install_dir: /opt/ds-cli
+  data_dir: /data/ds-cli
+  user: dolphinscheduler
+  java_home: /opt/ds-cli/java
+
+versions:
+  dolphinscheduler: 3.4.1
+  zookeeper: 3.8.4
+  java: "11"
+  mysql_driver: 8.0.33
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  database: dolphinscheduler
+  username: ds_user
+  password: ds_password
+  server_timezone: Asia/Shanghai
+  create_database: false
+  # create_database 为 true 时需要本机有 mysql CLI，并填写管理员账号：
+  # admin_username: root
+  # admin_password: root_password
+
+zookeeper:
+  client_port: 2181
+
+api:
+  port: 12345
+
+services:
+  api: true
+  master: true
+  worker: true
+  alert: true
