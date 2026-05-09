@@ -46,11 +46,11 @@ if [ -z "$VERSION" ]; then
   redirect=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
     "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)
   VERSION="${redirect##*/}"
-  if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
+  if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ] || [ "$VERSION" = "releases" ]; then
     api_resp=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null || true)
     VERSION=$(awk -F'"' '/"tag_name":/ { print $4; exit }' <<<"$api_resp")
   fi
-  [ -n "$VERSION" ] || die "could not determine latest release tag; pin with VERSION=vX.Y.Z"
+  [ -n "$VERSION" ] || die "could not determine latest GitHub release; create a release first or pin an existing release with VERSION=vX.Y.Z"
 fi
 
 ver_no_v="${VERSION#v}"

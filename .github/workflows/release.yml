@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  autotag:
+  release-main:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -26,6 +26,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
       - name: Compute and push next tag
+        id: tag
         run: |
           git fetch --tags --force origin
           latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
@@ -37,6 +38,14 @@ jobs:
           echo "latest tag: $latest -> next: $next"
           git tag -a "$next" -m "$next"
           git push origin "$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.tag }}
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
