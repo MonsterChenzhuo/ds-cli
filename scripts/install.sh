@@ -82,7 +82,11 @@ tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
 [ -x "${tmpdir}/ds-cli" ] || die "binary not found in archive"
 
 sudo_cmd=""
-if [ ! -w "$PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
+write_check="$PREFIX"
+if [ ! -d "$write_check" ]; then
+  write_check=$(dirname "$PREFIX")
+fi
+if [ ! -w "$write_check" ] && [ "$(id -u)" -ne 0 ]; then
   if [ "${NO_SUDO:-0}" = "1" ]; then
     die "PREFIX=$PREFIX not writable and NO_SUDO=1"
   fi
