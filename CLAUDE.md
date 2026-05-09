@@ -49,6 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts
 - 将 `ds.yaml.example` 复制到 `~/.ds-cli/ds.yaml.example`。
 - 支持环境变量：`VERSION`、`PREFIX`、`SKILL_DIR`、`NO_SUDO`、`REPO`。
 - 安装后 Claude Code 需要重新启动或重新加载会话，才能看到新安装的 skill。
+- 安装 CLI 和运行 Claude Code 必须是同一个系统用户。root 环境下 Claude Code 会读取 `/root/.claude/skills/`；普通用户环境下读取 `$HOME/.claude/skills/`。
 
 GitHub Actions：
 
@@ -56,7 +57,14 @@ GitHub Actions：
 - `.github/workflows/release.yml`：push 到 `main` 自动递增 patch tag，并在同一轮用 GoReleaser 生成 release；推送 `v*` tag 也会触发 release。
 - `.goreleaser.yaml`：打包 `linux/darwin` × `amd64/arm64`，tar.gz 包含 README、LICENSE、`ds.yaml.example` 和 `skills/**/*`。
 
-注意：如果只有 tag 没有 release artifact，一键安装会失败。安装脚本必须从 GitHub release 下载，不从源码构建。
+注意：如果只有 tag 没有 release artifact，一键安装会失败。安装脚本必须从 GitHub release 下载，不从源码构建。发布后需要确认 latest release 里至少包含：
+
+```text
+ds-cli_<version>_linux_amd64.tar.gz
+ds-cli_<version>_checksums.txt
+skills/ds/SKILL.md
+skills/dolphinscheduler-pseudo-cluster/SKILL.md
+```
 
 ## 代码结构
 
@@ -69,7 +77,8 @@ GitHub Actions：
 - `internal/packages`：维护 DolphinScheduler、ZooKeeper、MySQL Driver 下载地址。
 - `internal/render`：渲染 `dolphinscheduler_env.sh` 等配置内容。
 - `internal/runlog`：写入 `~/.ds-cli/runs/<run-id>/`。
-- `skills/dolphinscheduler-pseudo-cluster`：Claude Code 驱动 `ds-cli` 的 skill。
+- `skills/dolphinscheduler-pseudo-cluster`：Claude Code 驱动 `ds-cli` 的完整 skill。
+- `skills/ds`：`dolphinscheduler-pseudo-cluster` 的短别名，方便在 Claude Code 中通过 `/ds` 调用。
 
 ## 输出契约
 
@@ -93,6 +102,33 @@ GitHub Actions：
 - `ds.yaml.example`
 - `README.zh-CN.md`
 - `skills/dolphinscheduler-pseudo-cluster/SKILL.md`
+- `skills/ds/SKILL.md`
+
+## Skill 排障
+
+如果安装后 Claude Code 中输入 `/ds` 或 `/dolphinscheduler-pseudo-cluster` 找不到 skill，按顺序检查：
+
+```bash
+which ds-cli
+ds-cli --version
+find ~/.claude/skills -maxdepth 2 -name SKILL.md -print
+```
+
+期望看到：
+
+```text
+~/.claude/skills/ds/SKILL.md
+~/.claude/skills/dolphinscheduler-pseudo-cluster/SKILL.md
+```
+
+如果只看到 `~/.ds-cli/skills/...`，说明安装的是旧脚本或旧 release，需要重新执行最新安装脚本，或临时迁移：
+
+```bash
+mkdir -p ~/.claude/skills
+cp -R ~/.ds-cli/skills/* ~/.claude/skills/
+```
+
+迁移后重启 Claude Code。
 
 ## 开发注意事项
 
