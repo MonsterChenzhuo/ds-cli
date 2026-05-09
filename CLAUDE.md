@@ -45,9 +45,10 @@ curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts
 - 默认从 GitHub latest release 下载 `ds-cli_<version>_<os>_<arch>.tar.gz`。
 - 下载 `ds-cli_<version>_checksums.txt` 并校验 checksum。
 - 安装二进制到 `/usr/local/bin/ds-cli`。
-- 将 release 包内的 `skills/` 安装到 `~/.ds-cli/skills/`。
+- 将 release 包内的 `skills/` 安装到 `~/.claude/skills/`，这是 Claude Code 当前自动发现个人 skills 的目录。
 - 将 `ds.yaml.example` 复制到 `~/.ds-cli/ds.yaml.example`。
 - 支持环境变量：`VERSION`、`PREFIX`、`SKILL_DIR`、`NO_SUDO`、`REPO`。
+- 安装后 Claude Code 需要重新启动或重新加载会话，才能看到新安装的 skill。
 
 GitHub Actions：
 

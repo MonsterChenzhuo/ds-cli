@@ -18,7 +18,7 @@
 curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | bash
 ```
 
-脚本会自动识别 `linux/darwin` 和 `amd64/arm64`，下载 GitHub Release 中对应的 `ds-cli` 压缩包，校验 checksum，安装二进制，并把内置 Claude Code skill 安装到 `~/.ds-cli/skills/`。
+脚本会自动识别 `linux/darwin` 和 `amd64/arm64`，下载 GitHub Release 中对应的 `ds-cli` 压缩包，校验 checksum，安装二进制，并把内置 Claude Code skill 安装到 `~/.claude/skills/`，这样 Claude Code 能自动发现。
 
 常用覆盖参数：
 
@@ -48,6 +48,8 @@ bin/ds-cli --help
 - `.github/workflows/release.yml`：推送到 `main` 时自动递增 patch tag；推送 `v*` tag 时由 GoReleaser 打包 `linux/darwin`、`amd64/arm64` release artifact。
 
 GoReleaser 会把 `README`、`LICENSE`、`ds.yaml.example` 和 `skills/**/*` 一起放入 tar.gz 包，供一键安装脚本安装。
+
+安装后重启 Claude Code，输入 `/ds` 或 `/dolphinscheduler-pseudo-cluster` 应能看到对应 skill。
 
 ## 配置
 

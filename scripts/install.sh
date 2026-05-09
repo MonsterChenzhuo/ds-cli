@@ -5,7 +5,7 @@
 # Env overrides:
 #   VERSION=v0.1.0        pin a specific release (default: latest)
 #   PREFIX=/usr/local/bin install directory for the binary
-#   SKILL_DIR=~/.ds-cli/skills  install directory for bundled skills
+#   SKILL_DIR=~/.claude/skills  install directory for bundled Claude Code skills
 #   NO_SUDO=1             never use sudo; fail if PREFIX is not writable
 #   REPO=MonsterChenzhuo/ds-cli  override repo slug
 
@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="${REPO:-MonsterChenzhuo/ds-cli}"
 PREFIX="${PREFIX:-/usr/local/bin}"
-SKILL_DIR="${SKILL_DIR:-$HOME/.ds-cli/skills}"
+SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills}"
 VERSION="${VERSION:-}"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
