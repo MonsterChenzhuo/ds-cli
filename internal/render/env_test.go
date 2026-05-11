@@ -45,6 +45,32 @@ func TestDolphinSchedulerEnvRendersMySQLAndZooKeeper(t *testing.T) {
 	}
 }
 
+func TestDolphinSchedulerEnvRendersUserEnvironment(t *testing.T) {
+	cfg := config.Default()
+	cfg.Env.JavaHome = "/data/hadoopclient/JDK/jdk1.8.0_272"
+	cfg.Env.PythonLauncher = "/usr/bin/python3"
+	cfg.Env.HadoopUserName = "airflow"
+	cfg.Env.HadoopHome = "/data/hadoopclient/HDFS/hadoop"
+	cfg.Env.PathPrepend = []string{"$HADOOP_HOME/bin", "$HADOOP_HOME/sbin"}
+	cfg.Env.Exports = map[string]string{
+		"SPARK_HOME": "/data/spark",
+	}
+
+	env := DolphinSchedulerEnv(&cfg)
+	for _, want := range []string{
+		"export JAVA_HOME=${JAVA_HOME:-/data/hadoopclient/JDK/jdk1.8.0_272}",
+		"export PYTHON_LAUNCHER='/usr/bin/python3'",
+		"export HADOOP_USER_NAME='airflow'",
+		"export HADOOP_HOME='/data/hadoopclient/HDFS/hadoop'",
+		"export SPARK_HOME='/data/spark'",
+		"export PATH=$JAVA_HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH",
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("env missing %q:\n%s", want, env)
+		}
+	}
+}
+
 func TestZooKeeperConnectStringUsesExternalValue(t *testing.T) {
 	cfg := config.Default()
 	cfg.ZooKeeper.ExternalConnectString = "zk1:2181,zk2:2181,zk3:2181"

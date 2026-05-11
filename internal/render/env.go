@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/ds-cli/ds-cli/internal/config"
@@ -18,8 +19,10 @@ func MySQLJDBCURL(cfg *config.Config) string {
 }
 
 func DolphinSchedulerEnv(cfg *config.Config) string {
+	pathParts := []string{"$JAVA_HOME/bin"}
+	pathParts = append(pathParts, cfg.Env.PathPrepend...)
 	lines := []string{
-		fmt.Sprintf("export JAVA_HOME=${JAVA_HOME:-%s}", cfg.Cluster.JavaHome),
+		fmt.Sprintf("export JAVA_HOME=${JAVA_HOME:-%s}", RuntimeJavaHome(cfg)),
 		"export DATABASE=${DATABASE:-mysql}",
 		"export SPRING_PROFILES_ACTIVE=${DATABASE}",
 		fmt.Sprintf("export SPRING_DATASOURCE_URL=%q", MySQLJDBCURL(cfg)),
@@ -29,9 +32,28 @@ func DolphinSchedulerEnv(cfg *config.Config) string {
 		"export SPRING_JACKSON_TIME_ZONE=${SPRING_JACKSON_TIME_ZONE:-UTC}",
 		"export REGISTRY_TYPE=${REGISTRY_TYPE:-zookeeper}",
 		fmt.Sprintf("export REGISTRY_ZOOKEEPER_CONNECT_STRING=${REGISTRY_ZOOKEEPER_CONNECT_STRING:-%s}", ZooKeeperConnectString(cfg)),
-		"export PATH=$JAVA_HOME/bin:$PATH",
 	}
+	if cfg.Env.PythonLauncher != "" {
+		lines = append(lines, fmt.Sprintf("export PYTHON_LAUNCHER=%s", shellQuote(cfg.Env.PythonLauncher)))
+	}
+	if cfg.Env.HadoopUserName != "" {
+		lines = append(lines, fmt.Sprintf("export HADOOP_USER_NAME=%s", shellQuote(cfg.Env.HadoopUserName)))
+	}
+	if cfg.Env.HadoopHome != "" {
+		lines = append(lines, fmt.Sprintf("export HADOOP_HOME=%s", shellQuote(cfg.Env.HadoopHome)))
+	}
+	for _, name := range sortedExportNames(cfg.Env.Exports) {
+		lines = append(lines, fmt.Sprintf("export %s=%s", name, shellQuote(cfg.Env.Exports[name])))
+	}
+	lines = append(lines, fmt.Sprintf("export PATH=%s:$PATH", strings.Join(pathParts, ":")))
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func RuntimeJavaHome(cfg *config.Config) string {
+	if strings.TrimSpace(cfg.Env.JavaHome) != "" {
+		return cfg.Env.JavaHome
+	}
+	return cfg.Cluster.JavaHome
 }
 
 func ZooKeeperConnectString(cfg *config.Config) string {
@@ -48,4 +70,17 @@ func ZooKeeperConnectString(cfg *config.Config) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+func sortedExportNames(exports map[string]string) []string {
+	names := make([]string, 0, len(exports))
+	for name := range exports {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

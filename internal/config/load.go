@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -118,6 +119,28 @@ func Validate(cfg *Config) error {
 			return fmt.Errorf("unsupported plugins.task %q; supported: shell, python", p)
 		}
 	}
+	for name := range cfg.Env.Exports {
+		if !isShellIdentifier(name) {
+			return fmt.Errorf("env.exports contains invalid shell variable name %q", name)
+		}
+	}
+	for _, name := range []struct {
+		key   string
+		value string
+	}{
+		{key: "PYTHON_LAUNCHER", value: cfg.Env.PythonLauncher},
+		{key: "HADOOP_USER_NAME", value: cfg.Env.HadoopUserName},
+		{key: "HADOOP_HOME", value: cfg.Env.HadoopHome},
+	} {
+		if _, ok := cfg.Env.Exports[name.key]; ok && name.value != "" {
+			return fmt.Errorf("env.%s conflicts with env.exports.%s", strings.ToLower(name.key), name.key)
+		}
+	}
+	for _, p := range cfg.Env.PathPrepend {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("env.path_prepend must not contain empty entries")
+		}
+	}
 	if cfg.Distributed() {
 		if err := validateDistributed(cfg); err != nil {
 			return err
@@ -186,6 +209,24 @@ func validateDistributed(cfg *Config) error {
 		return errors.New(strings.Join(msgs, "; "))
 	}
 	return nil
+}
+
+func isShellIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func expand(path string) string {

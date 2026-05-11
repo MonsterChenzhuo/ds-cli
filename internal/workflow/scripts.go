@@ -234,7 +234,7 @@ func InitDBScript(cfg *config.Config) string {
 cd %q
 export JAVA_HOME=%q
 bash tools/bin/upgrade-schema.sh
-`, create, DSHome(cfg), cfg.Cluster.JavaHome)
+`, create, DSHome(cfg), render.RuntimeJavaHome(cfg))
 }
 
 func StartZooKeeperScript(cfg *config.Config) string {
@@ -242,14 +242,14 @@ func StartZooKeeperScript(cfg *config.Config) string {
 export JAVA_HOME=%q
 if %q/bin/zkServer.sh status >/dev/null 2>&1; then exit 0; fi
 %q/bin/zkServer.sh start
-`, cfg.Cluster.JavaHome, ZKHome(cfg), ZKHome(cfg))
+`, render.RuntimeJavaHome(cfg), ZKHome(cfg), ZKHome(cfg))
 }
 
 func StopZooKeeperScript(cfg *config.Config) string {
 	return fmt.Sprintf(`set -e
 export JAVA_HOME=%q
 %q/bin/zkServer.sh stop || true
-`, cfg.Cluster.JavaHome, ZKHome(cfg))
+`, render.RuntimeJavaHome(cfg), ZKHome(cfg))
 }
 
 func RestartZooKeeperScript(cfg *config.Config) string {
@@ -257,21 +257,21 @@ func RestartZooKeeperScript(cfg *config.Config) string {
 export JAVA_HOME=%q
 %q/bin/zkServer.sh stop || true
 %q/bin/zkServer.sh start
-`, cfg.Cluster.JavaHome, ZKHome(cfg), ZKHome(cfg))
+`, render.RuntimeJavaHome(cfg), ZKHome(cfg), ZKHome(cfg))
 }
 
 func StatusZooKeeperScript(cfg *config.Config) string {
 	return fmt.Sprintf(`set -e
 export JAVA_HOME=%q
 %q/bin/zkServer.sh status
-`, cfg.Cluster.JavaHome, ZKHome(cfg))
+`, render.RuntimeJavaHome(cfg), ZKHome(cfg))
 }
 
 func ServiceScript(cfg *config.Config, action string, services []string) string {
 	var b strings.Builder
 	b.WriteString("set -e\n")
 	b.WriteString(fmt.Sprintf("cd %q\n", DSHome(cfg)))
-	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", cfg.Cluster.JavaHome))
+	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", render.RuntimeJavaHome(cfg)))
 	for _, svc := range services {
 		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh %s %s\n", action, svc))
 	}
@@ -282,7 +282,7 @@ func RestartServiceScript(cfg *config.Config, services []string) string {
 	var b strings.Builder
 	b.WriteString("set -e\n")
 	b.WriteString(fmt.Sprintf("cd %q\n", DSHome(cfg)))
-	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", cfg.Cluster.JavaHome))
+	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", render.RuntimeJavaHome(cfg)))
 	for _, svc := range services {
 		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh stop %s || true\n", svc))
 	}
@@ -296,7 +296,7 @@ func StatusServiceScript(cfg *config.Config, services []string) string {
 	var b strings.Builder
 	b.WriteString("set -e\n")
 	b.WriteString(fmt.Sprintf("cd %q\n", DSHome(cfg)))
-	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", cfg.Cluster.JavaHome))
+	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", render.RuntimeJavaHome(cfg)))
 	b.WriteString("missing=0\n")
 	for _, svc := range services {
 		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh status %s || true\n", svc))
@@ -327,7 +327,7 @@ func InstallSystemdScript(cfg *config.Config, services []string) string {
 		b.WriteString("Type=forking\n")
 		b.WriteString(fmt.Sprintf("User=%s\n", cfg.Cluster.User))
 		b.WriteString(fmt.Sprintf("WorkingDirectory=%s\n", DSHome(cfg)))
-		b.WriteString(fmt.Sprintf("Environment=JAVA_HOME=%s\n", cfg.Cluster.JavaHome))
+		b.WriteString(fmt.Sprintf("Environment=JAVA_HOME=%s\n", render.RuntimeJavaHome(cfg)))
 		b.WriteString(fmt.Sprintf("ExecStart=%s/bin/dolphinscheduler-daemon.sh start %s\n", DSHome(cfg), svc))
 		b.WriteString(fmt.Sprintf("ExecStop=%s/bin/dolphinscheduler-daemon.sh stop %s\n", DSHome(cfg), svc))
 		b.WriteString("Restart=on-failure\nRestartSec=10\n\n")

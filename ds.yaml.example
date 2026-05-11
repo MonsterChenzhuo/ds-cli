@@ -41,6 +41,20 @@ services:
 plugins:
   task: [shell, python]
 
+env:
+  # 写入 $DOLPHINSCHEDULER_HOME/bin/env/dolphinscheduler_env.sh
+  # java_home 会覆盖运行时 JAVA_HOME；cluster.java_home 仍用于 ds-cli 安装/复用 JDK。
+  # java_home: /data/hadoopclient/JDK/jdk1.8.0_272
+  # python_launcher: /usr/bin/python3
+  # hadoop_user_name: airflow
+  # hadoop_home: /data/hadoopclient/HDFS/hadoop
+  # path_prepend:
+  #   - $HADOOP_HOME/bin
+  #   - $HADOOP_HOME/sbin
+  # exports:
+  #   SPARK_HOME: /data/spark
+  #   HIVE_HOME: /data/hive
+
 # 分布式模式示例。取消注释后，ds-cli 会通过 SSH 在多台机器部署。
 # ssh:
 #   user: dolphinscheduler

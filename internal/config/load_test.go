@@ -49,6 +49,50 @@ func TestValidateRequiresMySQLUser(t *testing.T) {
 	}
 }
 
+func TestLoadUserEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ds.yaml")
+	err := os.WriteFile(path, []byte(`
+mysql:
+  username: ds_user
+env:
+  java_home: /data/hadoopclient/JDK/jdk1.8.0_272
+  python_launcher: /usr/bin/python3
+  hadoop_user_name: airflow
+  hadoop_home: /data/hadoopclient/HDFS/hadoop
+  path_prepend:
+    - $HADOOP_HOME/bin
+    - $HADOOP_HOME/sbin
+  exports:
+    SPARK_HOME: /data/spark
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Env.PythonLauncher != "/usr/bin/python3" {
+		t.Fatalf("python launcher = %q", cfg.Env.PythonLauncher)
+	}
+	if got := strings.Join(cfg.Env.PathPrepend, ","); got != "$HADOOP_HOME/bin,$HADOOP_HOME/sbin" {
+		t.Fatalf("path_prepend = %q", got)
+	}
+}
+
+func TestValidateRejectsInvalidEnvExportName(t *testing.T) {
+	cfg := Default()
+	cfg.MySQL.Username = "ds_user"
+	cfg.Env.Exports = map[string]string{"BAD-NAME": "x"}
+
+	err := Validate(&cfg)
+	if err == nil || !strings.Contains(err.Error(), "invalid shell variable name") {
+		t.Fatalf("Validate error = %v", err)
+	}
+}
+
 func TestLoadDistributedWithManagedZooKeeper(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ds.yaml")

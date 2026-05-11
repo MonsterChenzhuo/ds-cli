@@ -29,6 +29,19 @@ zookeeper:
 plugins:
   task: [shell, python]
 
+env:
+  # 会写入每台 DolphinScheduler 服务节点的 bin/env/dolphinscheduler_env.sh
+  # java_home: /data/hadoopclient/JDK/jdk1.8.0_272
+  # python_launcher: /usr/bin/python3
+  # hadoop_user_name: airflow
+  # hadoop_home: /data/hadoopclient/HDFS/hadoop
+  # path_prepend:
+  #   - $HADOOP_HOME/bin
+  #   - $HADOOP_HOME/sbin
+  # exports:
+  #   SPARK_HOME: /data/spark
+  #   HIVE_HOME: /data/hive
+
 ssh:
   user: dolphinscheduler
   private_key: ~/.ssh/id_rsa

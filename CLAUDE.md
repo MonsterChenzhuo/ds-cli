@@ -9,6 +9,7 @@
 - 注册中心默认由 `ds-cli` 安装 ZooKeeper；分布式模式允许用户通过 `zookeeper.external_connect_string` 复用外部 ZooKeeper。
 - 元数据库使用用户提供的 MySQL；默认假设库和账号已存在，只有配置 `mysql.create_database: true` 时才用管理员账号创建数据库。
 - 默认通过官方 `bin/install-plugins.sh 3.4.1` 安装 task 插件 `shell` 和 `python`，jar 落在 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
+- 支持通过 `env` 配置块向 `dolphinscheduler_env.sh` 写入运行时环境变量，例如 `PYTHON_LAUNCHER`、`HADOOP_USER_NAME`、运行时 `JAVA_HOME`、`HADOOP_HOME`、`PATH` 前缀和任意额外 exports。
 - CLI 会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包、下载 MySQL JDBC Driver、渲染配置并执行库表初始化。
 
 ## 常用命令
@@ -109,6 +110,26 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - `README.zh-CN.md`
 - `skills/dolphinscheduler-pseudo-cluster/SKILL.md`
 - `skills/ds/SKILL.md`
+
+环境变量配置约定：
+
+```yaml
+env:
+  python_launcher: /usr/bin/python3
+  hadoop_user_name: airflow
+  java_home: /data/hadoopclient/JDK/jdk1.8.0_272
+  hadoop_home: /data/hadoopclient/HDFS/hadoop
+  path_prepend:
+    - $HADOOP_HOME/bin
+    - $HADOOP_HOME/sbin
+  exports:
+    SPARK_HOME: /data/spark
+```
+
+- `env.python_launcher` 会渲染为 `export PYTHON_LAUNCHER=...`。
+- `env.java_home` 只覆盖 DolphinScheduler 服务运行时的 `JAVA_HOME`；`cluster.java_home` 仍用于 ds-cli 安装或复用 JDK。
+- `env.path_prepend` 会追加到 `PATH` 的 `$JAVA_HOME/bin` 后面，顺序保持配置顺序。
+- `env.exports` 可写任意额外变量，但 key 必须是合法 shell 变量名。
 
 ## 插件与服务守护
 

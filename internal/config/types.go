@@ -48,6 +48,15 @@ type Plugins struct {
 	Task []string `yaml:"task"`
 }
 
+type Environment struct {
+	JavaHome       string            `yaml:"java_home"`
+	PythonLauncher string            `yaml:"python_launcher"`
+	HadoopUserName string            `yaml:"hadoop_user_name"`
+	HadoopHome     string            `yaml:"hadoop_home"`
+	PathPrepend    []string          `yaml:"path_prepend"`
+	Exports        map[string]string `yaml:"exports"`
+}
+
 type SSH struct {
 	Port        int    `yaml:"port"`
 	User        string `yaml:"user"`
@@ -69,16 +78,17 @@ type Roles struct {
 }
 
 type Config struct {
-	Cluster   Cluster   `yaml:"cluster"`
-	Versions  Versions  `yaml:"versions"`
-	MySQL     MySQL     `yaml:"mysql"`
-	ZooKeeper ZooKeeper `yaml:"zookeeper"`
-	API       API       `yaml:"api"`
-	Services  Services  `yaml:"services"`
-	Plugins   Plugins   `yaml:"plugins"`
-	SSH       SSH       `yaml:"ssh"`
-	Hosts     []Host    `yaml:"hosts"`
-	Roles     Roles     `yaml:"roles"`
+	Cluster   Cluster     `yaml:"cluster"`
+	Versions  Versions    `yaml:"versions"`
+	MySQL     MySQL       `yaml:"mysql"`
+	ZooKeeper ZooKeeper   `yaml:"zookeeper"`
+	API       API         `yaml:"api"`
+	Services  Services    `yaml:"services"`
+	Plugins   Plugins     `yaml:"plugins"`
+	Env       Environment `yaml:"env"`
+	SSH       SSH         `yaml:"ssh"`
+	Hosts     []Host      `yaml:"hosts"`
+	Roles     Roles       `yaml:"roles"`
 }
 
 func (c *Config) Distributed() bool {

@@ -10,6 +10,7 @@
 - 元数据库：使用用户提供的 MySQL。`ds-cli` 默认假设数据库和用户已存在；如果 `mysql.create_database: true`，会使用管理员账号通过本机 `mysql` CLI 创建数据库。
 - 任务插件：默认按官方流程写入 `conf/plugins_config`，执行 `bash ./bin/install-plugins.sh 3.4.1`，安装 `dolphinscheduler-task-shell` 和 `dolphinscheduler-task-python` 到 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
 - Java：如果 `cluster.java_home` 不存在，会优先复用系统 JDK 11，否则尝试通过 `apt-get`、`dnf`、`yum` 或 `brew` 安装 OpenJDK 11。
+- 环境变量：支持通过 `env` 配置块写入 `dolphinscheduler_env.sh`，例如 `PYTHON_LAUNCHER`、`HADOOP_USER_NAME`、运行时 `JAVA_HOME`、`HADOOP_HOME` 和 `PATH` 前缀。
 
 ## 安装
 
@@ -72,6 +73,36 @@ mysql:
 ```
 
 配置查找顺序为：`--config <path>` -> `$DSCLI_CONFIG` -> `./ds.yaml` -> `~/.ds-cli/ds.yaml`。
+
+### 环境变量
+
+`env` 配置会写入 `$DOLPHINSCHEDULER_HOME/bin/env/dolphinscheduler_env.sh`，用于 DolphinScheduler 服务和 task plugin 运行时。常见配置：
+
+```yaml
+env:
+  python_launcher: /usr/bin/python3
+  hadoop_user_name: airflow
+  java_home: /data/hadoopclient/JDK/jdk1.8.0_272
+  hadoop_home: /data/hadoopclient/HDFS/hadoop
+  path_prepend:
+    - $HADOOP_HOME/bin
+    - $HADOOP_HOME/sbin
+  exports:
+    SPARK_HOME: /data/spark
+    HIVE_HOME: /data/hive
+```
+
+会渲染为类似：
+
+```bash
+export PYTHON_LAUNCHER='/usr/bin/python3'
+export HADOOP_USER_NAME='airflow'
+export JAVA_HOME=${JAVA_HOME:-/data/hadoopclient/JDK/jdk1.8.0_272}
+export HADOOP_HOME='/data/hadoopclient/HDFS/hadoop'
+export PATH=$JAVA_HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin:$PATH
+```
+
+`cluster.java_home` 仍用于 `ds-cli` 安装或复用 JDK；`env.java_home` 用于覆盖 DolphinScheduler 服务运行时的 `JAVA_HOME`。
 
 ### 分布式配置
 
