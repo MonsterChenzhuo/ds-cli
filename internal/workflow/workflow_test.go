@@ -19,7 +19,7 @@ func TestStartServicesUsesPseudoClusterOrder(t *testing.T) {
 
 func TestBootstrapCommands(t *testing.T) {
 	got := BootstrapCommands()
-	want := []string{"preflight", "install-java", "install-zookeeper", "install-dolphinscheduler", "configure", "init-db", "start", "status"}
+	want := []string{"preflight", "install-java", "install-zookeeper", "install-dolphinscheduler", "install-task-plugins", "configure", "init-db", "start", "status"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands = %#v, want %#v", got, want)
 	}
@@ -48,10 +48,14 @@ func TestAPIWorkerServices(t *testing.T) {
 	}
 }
 
-func TestInstallTaskPluginsScriptDownloadsShellAndPython(t *testing.T) {
+func TestInstallTaskPluginsScriptUsesOfficialInstaller(t *testing.T) {
 	cfg := config.Default()
 	got := InstallTaskPluginsScript(&cfg)
 	for _, want := range []string{
+		"conf/plugins_config",
+		"bash ./bin/install-plugins.sh 3.4.1",
+		"dolphinscheduler-task-shell",
+		"dolphinscheduler-task-python",
 		"dolphinscheduler-task-shell-3.4.1.jar",
 		"dolphinscheduler-task-python-3.4.1.jar",
 		"plugins/task-plugins",

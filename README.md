@@ -1,6 +1,8 @@
 # ds-cli
 
-`ds-cli` deploys Apache DolphinScheduler 3.4.1 in local pseudo-cluster mode.
+`ds-cli` deploys Apache DolphinScheduler 3.4.1 in local pseudo-cluster or distributed mode.
+
+Task plugins are installed through DolphinScheduler's official flow: render `conf/plugins_config`, run `bash ./bin/install-plugins.sh 3.4.1`, and verify the configured jars under `plugins/task-plugins/`.
 
 ## Install
 

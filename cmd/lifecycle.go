@@ -31,7 +31,7 @@ func newPreflightCmd() *cobra.Command {
 func newInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install Java, managed ZooKeeper, DolphinScheduler, and MySQL JDBC driver.",
+		Short: "Install Java, managed ZooKeeper, DolphinScheduler, MySQL JDBC driver, and task plugins.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rc, err := prepare(cmd, "install")
 			if err != nil {
@@ -49,13 +49,17 @@ func newInstallCmd() *cobra.Command {
 					!rc.runRemoteSameStep(ctx, e, "install-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.InstallZooKeeperScript(rc.Cfg)) {
 					return finish(rc, e)
 				}
-				rc.runRemoteSameStep(ctx, e, "install-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.InstallDolphinSchedulerScript(rc.Cfg))
+				if !rc.runRemoteSameStep(ctx, e, "install-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.InstallDolphinSchedulerScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				rc.runRemoteSameStep(ctx, e, "install-task-plugins", rc.Cfg.ServiceHosts(), workflow.InstallTaskPluginsScript(rc.Cfg))
 				return finish(rc, e)
 			}
 			for _, step := range []struct{ name, script string }{
 				{"install-java", workflow.InstallJavaScript(rc.Cfg)},
 				{"install-zookeeper", workflow.InstallZooKeeperScript(rc.Cfg)},
 				{"install-dolphinscheduler", workflow.InstallDolphinSchedulerScript(rc.Cfg)},
+				{"install-task-plugins", workflow.InstallTaskPluginsScript(rc.Cfg)},
 			} {
 				if !rc.runStep(ctx, e, step.name, step.script) {
 					break
@@ -359,7 +363,7 @@ func newBootstrapCmd() *cobra.Command {
 				{"init-db", workflow.InitDBScript(rc.Cfg)},
 				{"start-zookeeper", workflow.StartZooKeeperScript(rc.Cfg)},
 				{"start-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "start", workflow.StartServices(rc.Cfg))},
-				{"status-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "status", workflow.StartServices(rc.Cfg))},
+				{"status-dolphinscheduler", workflow.StatusServiceScript(rc.Cfg, workflow.StartServices(rc.Cfg))},
 			}
 			for _, step := range steps {
 				if !rc.runStep(ctx, e, step.name, step.script) {

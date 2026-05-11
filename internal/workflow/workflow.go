@@ -84,5 +84,5 @@ func contains(xs []string, v string) bool {
 }
 
 func BootstrapCommands() []string {
-	return []string{"preflight", "install-java", "install-zookeeper", "install-dolphinscheduler", "configure", "init-db", "start", "status"}
+	return []string{"preflight", "install-java", "install-zookeeper", "install-dolphinscheduler", "install-task-plugins", "configure", "init-db", "start", "status"}
 }

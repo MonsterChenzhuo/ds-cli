@@ -8,7 +8,7 @@
 - 分布式模式：通过 `hosts`、`ssh`、`roles` 在多台 Linux/macOS 机器上部署 DolphinScheduler 服务。
 - 注册中心默认由 `ds-cli` 安装 ZooKeeper；分布式模式允许用户通过 `zookeeper.external_connect_string` 复用外部 ZooKeeper。
 - 元数据库使用用户提供的 MySQL；默认假设库和账号已存在，只有配置 `mysql.create_database: true` 时才用管理员账号创建数据库。
-- 默认安装 task 插件 `shell` 和 `python`，jar 落在 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
+- 默认通过官方 `bin/install-plugins.sh 3.4.1` 安装 task 插件 `shell` 和 `python`，jar 落在 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
 - CLI 会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包、下载 MySQL JDBC Driver、渲染配置并执行库表初始化。
 
 ## 常用命令
@@ -113,7 +113,16 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 ## 插件与服务守护
 
 - 默认 task 插件：`shell`、`python`。
-- 插件下载地址来自 Maven Central，例如 `dolphinscheduler-task-python-3.4.1.jar` 和 `dolphinscheduler-task-shell-3.4.1.jar`。
+- DolphinScheduler 3.4.1 二进制包不包含插件依赖，`ds-cli` 会按官方文档写入 `$DOLPHINSCHEDULER_HOME/conf/plugins_config`，内容类似：
+
+```text
+--task-plugins--
+dolphinscheduler-task-shell
+dolphinscheduler-task-python
+--end--
+```
+
+- 写入配置后执行 `bash ./bin/install-plugins.sh 3.4.1`，由官方脚本下载依赖并安装到 `plugins/task-plugins/`。
 - `install` 和 `bootstrap` 会安装默认插件。
 - 用户需要补装或修复插件时，使用：
 
@@ -121,7 +130,7 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 ds-cli plugins --restart
 ```
 
-该命令会下载插件到 `plugins/task-plugins/`，并重启 `api-server`、`worker-server`。
+该命令会重写 `conf/plugins_config`，执行官方插件安装脚本，校验 `dolphinscheduler-task-shell-3.4.1.jar`、`dolphinscheduler-task-python-3.4.1.jar` 是否存在，并重启 `api-server`、`worker-server`。
 
 服务静默退出的长期方案：
 

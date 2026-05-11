@@ -29,6 +29,7 @@ need uname uname
 need bash bash
 need curl curl
 need tar tar
+need awk awk
 %s
 test -n %q || { echo "mysql.username is empty" >&2; exit 1; }
 test -n %q || { echo "mysql.host is empty" >&2; exit 1; }
@@ -164,38 +165,50 @@ for d in api-server/libs alert-server/libs master-server/libs worker-server/libs
   mkdir -p %q/$d
   cp %q/packages/%s %q/$d/
 done
-%s
 `, cfg.Cluster.InstallDir, cfg.Cluster.InstallDir, cfg.Cluster.DataDir,
 		home, cfg.Cluster.InstallDir, dsSpec.Filename, dsSpec.URL,
 		cfg.Cluster.InstallDir, dsSpec.Filename, cfg.Cluster.InstallDir,
 		home, cfg.Cluster.InstallDir, cfg.Versions.DolphinScheduler, home,
 		cfg.Cluster.InstallDir, driver.Filename, driver.URL,
-		home, cfg.Cluster.InstallDir, driver.Filename, home,
-		InstallTaskPluginsFragment(cfg))
+		home, cfg.Cluster.InstallDir, driver.Filename, home)
 }
 
-func InstallTaskPluginsFragment(cfg *config.Config) string {
-	if len(cfg.Plugins.Task) == 0 {
-		return ""
-	}
+func PluginsConfig(cfg *config.Config) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("mkdir -p %q/plugins/task-plugins\n", DSHome(cfg)))
+	b.WriteString("--task-plugins--\n")
 	for _, plugin := range cfg.Plugins.Task {
-		spec, err := packages.TaskPluginSpec(plugin, cfg.Versions.DolphinScheduler)
-		if err != nil {
-			continue
-		}
-		b.WriteString(fmt.Sprintf("curl -fL -o %q/packages/%s %q\n", cfg.Cluster.InstallDir, spec.Filename, spec.URL))
-		b.WriteString(fmt.Sprintf("cp %q/packages/%s %q/plugins/task-plugins/%s\n", cfg.Cluster.InstallDir, spec.Filename, DSHome(cfg), spec.Filename))
+		b.WriteString(fmt.Sprintf("dolphinscheduler-task-%s\n", plugin))
 	}
+	b.WriteString("--end--\n")
 	return b.String()
 }
 
+func taskPluginJar(plugin, version string) string {
+	return fmt.Sprintf("dolphinscheduler-task-%s-%s.jar", plugin, version)
+}
+
 func InstallTaskPluginsScript(cfg *config.Config) string {
+	home := DSHome(cfg)
+	if len(cfg.Plugins.Task) == 0 {
+		return fmt.Sprintf(`set -e
+test -d %q || { echo "DolphinScheduler home not found: %s" >&2; exit 1; }
+echo "no task plugins configured; skip official plugin installer"
+`, home, home)
+	}
+	var checks strings.Builder
+	for _, plugin := range cfg.Plugins.Task {
+		jar := taskPluginJar(plugin, cfg.Versions.DolphinScheduler)
+		checks.WriteString(fmt.Sprintf("test -f %q/plugins/task-plugins/%s || { echo \"missing task plugin after install-plugins.sh: %s\" >&2; exit 1; }\n", home, jar, jar))
+	}
 	return fmt.Sprintf(`set -e
 test -d %q || { echo "DolphinScheduler home not found: %s" >&2; exit 1; }
-mkdir -p %q/packages
-%s`, DSHome(cfg), DSHome(cfg), cfg.Cluster.InstallDir, InstallTaskPluginsFragment(cfg))
+test -f %q/bin/install-plugins.sh || { echo "DolphinScheduler official plugin installer not found: %s/bin/install-plugins.sh" >&2; exit 1; }
+mkdir -p %q/conf %q/plugins/task-plugins
+cat > %q/conf/plugins_config <<'EOF'
+%sEOF
+cd %q
+bash ./bin/install-plugins.sh %s
+%s`, home, home, home, home, home, home, home, PluginsConfig(cfg), home, cfg.Versions.DolphinScheduler, checks.String())
 }
 
 func ConfigureScript(cfg *config.Config) string {
@@ -288,7 +301,7 @@ func StatusServiceScript(cfg *config.Config, services []string) string {
   if command -v jps >/dev/null 2>&1; then
     if jps -l | grep -E "$pattern" >/dev/null 2>&1; then return 0; fi
   fi
-  ps -eo pid,args | awk -v self="$$" -v pat="$pattern" '$1 != self && $0 ~ pat && $0 !~ /bash -lc/ {found=1} END { exit found ? 0 : 1 }'
+  ps -eo pid,args | awk -v self="$$" -v pat="$pattern" '$1 != self && $0 ~ pat && $0 !~ /bash -lc/ && $0 !~ /awk -v/ {found=1} END { exit found ? 0 : 1 }'
 }
 ` + b.String()
 }
