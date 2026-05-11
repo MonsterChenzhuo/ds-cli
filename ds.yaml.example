@@ -38,6 +38,9 @@ services:
   worker: true
   alert: true
 
+plugins:
+  task: [shell, python]
+
 # 分布式模式示例。取消注释后，ds-cli 会通过 SSH 在多台机器部署。
 # ssh:
 #   user: dolphinscheduler

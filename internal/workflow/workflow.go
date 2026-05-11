@@ -52,6 +52,28 @@ func HostServicesReverse(cfg *config.Config, host string) []string {
 	return services
 }
 
+func APIWorkerServices(cfg *config.Config) []string {
+	var services []string
+	if cfg.Services.API {
+		services = append(services, "api-server")
+	}
+	if cfg.Services.Worker {
+		services = append(services, "worker-server")
+	}
+	return services
+}
+
+func HostAPIWorkerServices(cfg *config.Config, host string) []string {
+	var services []string
+	if contains(cfg.Roles.API, host) {
+		services = append(services, "api-server")
+	}
+	if contains(cfg.Roles.Worker, host) {
+		services = append(services, "worker-server")
+	}
+	return services
+}
+
 func contains(xs []string, v string) bool {
 	for _, x := range xs {
 		if x == v {

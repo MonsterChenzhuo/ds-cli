@@ -18,11 +18,13 @@ func NewRootCmd() *cobra.Command {
 
 	root.AddCommand(newPreflightCmd())
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newConfigureCmd())
 	root.AddCommand(newInitDBCmd())
 	root.AddCommand(newStartCmd())
 	root.AddCommand(newStopCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newSystemdCmd())
 	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newBootstrapCmd())
 	return root

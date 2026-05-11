@@ -8,6 +8,7 @@
 - DolphinScheduler：固定支持 `3.4.1`。
 - 注册中心：默认由 `ds-cli` 安装 ZooKeeper；分布式模式支持 `roles.zookeeper` 管理 1/3/5 节点 ZK，也支持 `zookeeper.external_connect_string` 复用外部 ZK。
 - 元数据库：使用用户提供的 MySQL。`ds-cli` 默认假设数据库和用户已存在；如果 `mysql.create_database: true`，会使用管理员账号通过本机 `mysql` CLI 创建数据库。
+- 任务插件：默认安装 `dolphinscheduler-task-shell` 和 `dolphinscheduler-task-python` 到 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
 - Java：如果 `cluster.java_home` 不存在，会优先复用系统 JDK 11，否则尝试通过 `apt-get`、`dnf`、`yum` 或 `brew` 安装 OpenJDK 11。
 
 ## 安装
@@ -121,6 +122,7 @@ ds-cli preflight
 ds-cli install
 ds-cli configure
 ds-cli init-db
+ds-cli plugins --restart
 ds-cli start
 ds-cli status
 ```
@@ -153,8 +155,16 @@ admin / dolphinscheduler123
 ds-cli stop
 ds-cli start
 ds-cli status
+ds-cli plugins --restart
+ds-cli systemd
 ds-cli uninstall
 ds-cli uninstall --purge-data
 ```
 
 `--purge-data` 会删除 `cluster.data_dir`，谨慎使用。
+
+`ds-cli status` 会逐服务检查 `ApiApplicationServer`、`MasterServer`、`WorkerServer`、`AlertServer` 进程，任一声明服务缺失都会返回失败。
+
+`ds-cli plugins --restart` 会重新下载配置的任务插件，并重启 `api-server` 和 `worker-server`。
+
+`ds-cli systemd` 会为 DolphinScheduler 服务安装 systemd unit，包含 `Restart=on-failure`，用于避免服务静默退出后无人拉起。

@@ -34,6 +34,9 @@ mysql:
 	if !cfg.Services.API || !cfg.Services.Master || !cfg.Services.Worker || !cfg.Services.Alert {
 		t.Fatalf("expected all pseudo-cluster services enabled by default: %+v", cfg.Services)
 	}
+	if got := strings.Join(cfg.Plugins.Task, ","); got != "shell,python" {
+		t.Fatalf("default task plugins = %q", got)
+	}
 }
 
 func TestValidateRequiresMySQLUser(t *testing.T) {

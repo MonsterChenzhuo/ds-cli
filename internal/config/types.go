@@ -44,6 +44,10 @@ type Services struct {
 	Alert  bool `yaml:"alert"`
 }
 
+type Plugins struct {
+	Task []string `yaml:"task"`
+}
+
 type SSH struct {
 	Port        int    `yaml:"port"`
 	User        string `yaml:"user"`
@@ -71,6 +75,7 @@ type Config struct {
 	ZooKeeper ZooKeeper `yaml:"zookeeper"`
 	API       API       `yaml:"api"`
 	Services  Services  `yaml:"services"`
+	Plugins   Plugins   `yaml:"plugins"`
 	SSH       SSH       `yaml:"ssh"`
 	Hosts     []Host    `yaml:"hosts"`
 	Roles     Roles     `yaml:"roles"`

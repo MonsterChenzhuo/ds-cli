@@ -30,3 +30,15 @@ func MySQLDriverSpec(version string) Spec {
 	url := fmt.Sprintf("https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/%s/%s", version, filename)
 	return Spec{Name: "mysql-driver", Version: version, URL: url, Filename: filename}
 }
+
+func TaskPluginSpec(plugin, version string) (Spec, error) {
+	switch plugin {
+	case "shell", "python":
+	default:
+		return Spec{}, fmt.Errorf("unsupported task plugin %s", plugin)
+	}
+	artifact := fmt.Sprintf("dolphinscheduler-task-%s", plugin)
+	filename := fmt.Sprintf("%s-%s.jar", artifact, version)
+	url := fmt.Sprintf("https://repo1.maven.org/maven2/org/apache/dolphinscheduler/%s/%s/%s", artifact, version, filename)
+	return Spec{Name: "task-" + plugin, Version: version, URL: url, Filename: filename}, nil
+}

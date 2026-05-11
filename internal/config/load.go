@@ -36,6 +36,7 @@ func Default() Config {
 		ZooKeeper: ZooKeeper{ClientPort: 2181},
 		API:       API{Port: 12345},
 		Services:  Services{API: true, Master: true, Worker: true, Alert: true},
+		Plugins:   Plugins{Task: []string{"shell", "python"}},
 		SSH:       SSH{Port: 22, Parallelism: 4},
 	}
 }
@@ -111,6 +112,11 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Cluster.Mode != "" && cfg.Cluster.Mode != "pseudo" && cfg.Cluster.Mode != "distributed" {
 		return fmt.Errorf("cluster.mode must be pseudo or distributed")
+	}
+	for _, p := range cfg.Plugins.Task {
+		if p != "shell" && p != "python" {
+			return fmt.Errorf("unsupported plugins.task %q; supported: shell, python", p)
+		}
 	}
 	if cfg.Distributed() {
 		if err := validateDistributed(cfg); err != nil {

@@ -26,6 +26,9 @@ zookeeper:
   # 复用外部 ZooKeeper 时填写此项，并删除 roles.zookeeper：
   # external_connect_string: zk1:2181,zk2:2181,zk3:2181
 
+plugins:
+  task: [shell, python]
+
 ssh:
   user: dolphinscheduler
   private_key: ~/.ssh/id_rsa

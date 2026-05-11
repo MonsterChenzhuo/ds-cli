@@ -8,6 +8,7 @@
 - 分布式模式：通过 `hosts`、`ssh`、`roles` 在多台 Linux/macOS 机器上部署 DolphinScheduler 服务。
 - 注册中心默认由 `ds-cli` 安装 ZooKeeper；分布式模式允许用户通过 `zookeeper.external_connect_string` 复用外部 ZooKeeper。
 - 元数据库使用用户提供的 MySQL；默认假设库和账号已存在，只有配置 `mysql.create_database: true` 时才用管理员账号创建数据库。
+- 默认安装 task 插件 `shell` 和 `python`，jar 落在 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
 - CLI 会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包、下载 MySQL JDBC Driver、渲染配置并执行库表初始化。
 
 ## 常用命令
@@ -72,7 +73,7 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - `main.go`：入口，创建并执行 Cobra root command。
 - `cmd/`：生命周期命令层，负责加载配置、创建 runlog、执行步骤并输出 JSON envelope。
 - `internal/config`：加载 `ds.yaml`、合并默认值、校验配置。
-- `internal/workflow`：生成本机部署需要的 bash 脚本，要求尽量幂等。
+- `internal/workflow`：生成部署需要的 bash 脚本，要求尽量幂等；包含插件安装、逐服务 status、systemd unit 渲染。
 - `internal/local`：通过 `bash -lc` 执行步骤，记录每个步骤的 stdout/stderr。
 - `internal/remote`：SSH client、连接池和远程 runner；分布式模式使用它在 hosts 上并发执行任务。
 - `internal/output`：定义 stdout JSON envelope。
@@ -88,6 +89,8 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - stderr 用于人类可读进度。
 - 每次运行写入 `~/.ds-cli/runs/<run-id>/`，失败时优先查看 `<step>.stderr`。
 - 失败命令也应尽量输出完整 envelope，并返回非零退出码。
+- `preflight` 失败必须把缺失工具或配置项写入 stderr，避免只出现 `exit status 1`。
+- `status` 必须逐服务核对进程，不允许只要任意 DolphinScheduler 进程存在就判定成功。
 
 ## 配置约定
 
@@ -106,6 +109,27 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - `README.zh-CN.md`
 - `skills/dolphinscheduler-pseudo-cluster/SKILL.md`
 - `skills/ds/SKILL.md`
+
+## 插件与服务守护
+
+- 默认 task 插件：`shell`、`python`。
+- 插件下载地址来自 Maven Central，例如 `dolphinscheduler-task-python-3.4.1.jar` 和 `dolphinscheduler-task-shell-3.4.1.jar`。
+- `install` 和 `bootstrap` 会安装默认插件。
+- 用户需要补装或修复插件时，使用：
+
+```bash
+ds-cli plugins --restart
+```
+
+该命令会下载插件到 `plugins/task-plugins/`，并重启 `api-server`、`worker-server`。
+
+服务静默退出的长期方案：
+
+```bash
+ds-cli systemd
+```
+
+该命令为声明的 DolphinScheduler 服务安装 systemd unit，并设置 `Restart=on-failure`。
 
 ## Skill 排障
 

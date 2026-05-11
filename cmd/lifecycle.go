@@ -94,6 +94,44 @@ func newConfigureCmd() *cobra.Command {
 	}
 }
 
+func newPluginsCmd() *cobra.Command {
+	var restart bool
+	cmd := &cobra.Command{
+		Use:   "plugins",
+		Short: "Install configured DolphinScheduler task plugins and optionally restart api/worker.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rc, err := prepare(cmd, "plugins")
+			if err != nil {
+				return err
+			}
+			ctx, cancel := commandCtx()
+			defer cancel()
+			e := rc.envelope("plugins")
+			if rc.Cfg.Distributed() {
+				hosts := rc.Cfg.ServiceHosts()
+				if !rc.runRemoteSameStep(ctx, e, "install-task-plugins", hosts, workflow.InstallTaskPluginsScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if restart {
+					for _, host := range hosts {
+						services := workflow.HostAPIWorkerServices(rc.Cfg, host)
+						if len(services) > 0 {
+							rc.runRemoteSameStep(ctx, e, "restart-api-worker", []string{host}, workflow.RestartServiceScript(rc.Cfg, services))
+						}
+					}
+				}
+				return finish(rc, e)
+			}
+			if rc.runStep(ctx, e, "install-task-plugins", workflow.InstallTaskPluginsScript(rc.Cfg)) && restart {
+				rc.runStep(ctx, e, "restart-api-worker", workflow.RestartServiceScript(rc.Cfg, workflow.APIWorkerServices(rc.Cfg)))
+			}
+			return finish(rc, e)
+		},
+	}
+	cmd.Flags().BoolVar(&restart, "restart", true, "restart api-server and worker-server after installing plugins")
+	return cmd
+}
+
 func newInitDBCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init-db",
@@ -192,12 +230,39 @@ func newStatusCmd() *cobra.Command {
 					rc.runRemoteSameStep(ctx, e, "status-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.StatusZooKeeperScript(rc.Cfg))
 				}
 				for _, host := range rc.Cfg.ServiceHosts() {
-					rc.runRemoteSameStep(ctx, e, "status-dolphinscheduler", []string{host}, workflow.ServiceScript(rc.Cfg, "status", workflow.HostServices(rc.Cfg, host)))
+					rc.runRemoteSameStep(ctx, e, "status-dolphinscheduler", []string{host}, workflow.StatusServiceScript(rc.Cfg, workflow.HostServices(rc.Cfg, host)))
 				}
 				return finish(rc, e)
 			}
 			rc.runStep(ctx, e, "status-zookeeper", workflow.StatusZooKeeperScript(rc.Cfg))
-			rc.runStep(ctx, e, "status-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "status", workflow.StartServices(rc.Cfg)))
+			rc.runStep(ctx, e, "status-dolphinscheduler", workflow.StatusServiceScript(rc.Cfg, workflow.StartServices(rc.Cfg)))
+			return finish(rc, e)
+		},
+	}
+}
+
+func newSystemdCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "systemd",
+		Short: "Install systemd units with Restart=on-failure for DolphinScheduler services.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rc, err := prepare(cmd, "systemd")
+			if err != nil {
+				return err
+			}
+			ctx, cancel := commandCtx()
+			defer cancel()
+			e := rc.envelope("systemd")
+			if rc.Cfg.Distributed() {
+				for _, host := range rc.Cfg.ServiceHosts() {
+					services := workflow.HostServices(rc.Cfg, host)
+					if len(services) > 0 {
+						rc.runRemoteSameStep(ctx, e, "install-systemd", []string{host}, workflow.InstallSystemdScript(rc.Cfg, services))
+					}
+				}
+				return finish(rc, e)
+			}
+			rc.runStep(ctx, e, "install-systemd", workflow.InstallSystemdScript(rc.Cfg, workflow.StartServices(rc.Cfg)))
 			return finish(rc, e)
 		},
 	}
@@ -264,6 +329,9 @@ func newBootstrapCmd() *cobra.Command {
 				if !rc.runRemoteSameStep(ctx, e, "install-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.InstallDolphinSchedulerScript(rc.Cfg)) {
 					return finish(rc, e)
 				}
+				if !rc.runRemoteSameStep(ctx, e, "install-task-plugins", rc.Cfg.ServiceHosts(), workflow.InstallTaskPluginsScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
 				if !rc.runRemoteSameStep(ctx, e, "configure-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.ConfigureDolphinSchedulerScript(rc.Cfg)) {
 					return finish(rc, e)
 				}
@@ -286,6 +354,7 @@ func newBootstrapCmd() *cobra.Command {
 				{"install-java", workflow.InstallJavaScript(rc.Cfg)},
 				{"install-zookeeper", workflow.InstallZooKeeperScript(rc.Cfg)},
 				{"install-dolphinscheduler", workflow.InstallDolphinSchedulerScript(rc.Cfg)},
+				{"install-task-plugins", workflow.InstallTaskPluginsScript(rc.Cfg)},
 				{"configure", workflow.ConfigureScript(rc.Cfg)},
 				{"init-db", workflow.InitDBScript(rc.Cfg)},
 				{"start-zookeeper", workflow.StartZooKeeperScript(rc.Cfg)},

@@ -18,18 +18,20 @@ func ZKHome(cfg *config.Config) string {
 }
 
 func PreflightScript(cfg *config.Config) string {
-	checkMySQL := "true"
+	checkMySQL := "pass mysql-client optional"
 	if cfg.MySQL.CreateDatabase {
-		checkMySQL = "command -v mysql >/dev/null"
+		checkMySQL = "need mysql mysql-client"
 	}
 	return fmt.Sprintf(`set -e
-uname -s >/dev/null
-command -v bash >/dev/null
-command -v curl >/dev/null
-command -v tar >/dev/null
+need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $2 ($1)" >&2; exit 1; }; }
+pass() { :; }
+need uname uname
+need bash bash
+need curl curl
+need tar tar
 %s
-test -n %q
-test -n %q
+test -n %q || { echo "mysql.username is empty" >&2; exit 1; }
+test -n %q || { echo "mysql.host is empty" >&2; exit 1; }
 `, checkMySQL, cfg.MySQL.Username, cfg.MySQL.Host)
 }
 
@@ -151,22 +153,49 @@ func InstallDolphinSchedulerScript(cfg *config.Config) string {
 	home := DSHome(cfg)
 	return fmt.Sprintf(`set -e
 mkdir -p %q %q/packages %q/dolphinscheduler
-if [ -x %q/bin/dolphinscheduler-daemon.sh ]; then exit 0; fi
-curl -fL -o %q/packages/%s %q
-tar -xzf %q/packages/%s -C %q
-rm -rf %q
-mv %q/apache-dolphinscheduler-%s-bin %q
+if [ ! -x %q/bin/dolphinscheduler-daemon.sh ]; then
+  curl -fL -o %q/packages/%s %q
+  tar -xzf %q/packages/%s -C %q
+  rm -rf %q
+  mv %q/apache-dolphinscheduler-%s-bin %q
+fi
 curl -fL -o %q/packages/%s %q
 for d in api-server/libs alert-server/libs master-server/libs worker-server/libs tools/libs; do
   mkdir -p %q/$d
   cp %q/packages/%s %q/$d/
 done
+%s
 `, cfg.Cluster.InstallDir, cfg.Cluster.InstallDir, cfg.Cluster.DataDir,
 		home, cfg.Cluster.InstallDir, dsSpec.Filename, dsSpec.URL,
 		cfg.Cluster.InstallDir, dsSpec.Filename, cfg.Cluster.InstallDir,
 		home, cfg.Cluster.InstallDir, cfg.Versions.DolphinScheduler, home,
 		cfg.Cluster.InstallDir, driver.Filename, driver.URL,
-		home, cfg.Cluster.InstallDir, driver.Filename, home)
+		home, cfg.Cluster.InstallDir, driver.Filename, home,
+		InstallTaskPluginsFragment(cfg))
+}
+
+func InstallTaskPluginsFragment(cfg *config.Config) string {
+	if len(cfg.Plugins.Task) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("mkdir -p %q/plugins/task-plugins\n", DSHome(cfg)))
+	for _, plugin := range cfg.Plugins.Task {
+		spec, err := packages.TaskPluginSpec(plugin, cfg.Versions.DolphinScheduler)
+		if err != nil {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("curl -fL -o %q/packages/%s %q\n", cfg.Cluster.InstallDir, spec.Filename, spec.URL))
+		b.WriteString(fmt.Sprintf("cp %q/packages/%s %q/plugins/task-plugins/%s\n", cfg.Cluster.InstallDir, spec.Filename, DSHome(cfg), spec.Filename))
+	}
+	return b.String()
+}
+
+func InstallTaskPluginsScript(cfg *config.Config) string {
+	return fmt.Sprintf(`set -e
+test -d %q || { echo "DolphinScheduler home not found: %s" >&2; exit 1; }
+mkdir -p %q/packages
+%s`, DSHome(cfg), DSHome(cfg), cfg.Cluster.InstallDir, InstallTaskPluginsFragment(cfg))
 }
 
 func ConfigureScript(cfg *config.Config) string {
@@ -226,6 +255,80 @@ func ServiceScript(cfg *config.Config, action string, services []string) string 
 		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh %s %s\n", action, svc))
 	}
 	return b.String()
+}
+
+func RestartServiceScript(cfg *config.Config, services []string) string {
+	var b strings.Builder
+	b.WriteString("set -e\n")
+	b.WriteString(fmt.Sprintf("cd %q\n", DSHome(cfg)))
+	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", cfg.Cluster.JavaHome))
+	for _, svc := range services {
+		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh stop %s || true\n", svc))
+	}
+	for _, svc := range services {
+		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh start %s\n", svc))
+	}
+	return b.String()
+}
+
+func StatusServiceScript(cfg *config.Config, services []string) string {
+	var b strings.Builder
+	b.WriteString("set -e\n")
+	b.WriteString(fmt.Sprintf("cd %q\n", DSHome(cfg)))
+	b.WriteString(fmt.Sprintf("export JAVA_HOME=%q\n", cfg.Cluster.JavaHome))
+	b.WriteString("missing=0\n")
+	for _, svc := range services {
+		b.WriteString(fmt.Sprintf("bash ./bin/dolphinscheduler-daemon.sh status %s || true\n", svc))
+		b.WriteString(fmt.Sprintf("if ! service_running %q %q; then echo \"missing DolphinScheduler service: %s\" >&2; missing=1; fi\n", svc, serviceMainPattern(svc), svc))
+	}
+	b.WriteString("if [ \"$missing\" -ne 0 ]; then exit 1; fi\n")
+	return `service_running() {
+  svc="$1"
+  pattern="$2"
+  if command -v jps >/dev/null 2>&1; then
+    if jps -l | grep -E "$pattern" >/dev/null 2>&1; then return 0; fi
+  fi
+  ps -eo pid,args | awk -v self="$$" -v pat="$pattern" '$1 != self && $0 ~ pat && $0 !~ /bash -lc/ {found=1} END { exit found ? 0 : 1 }'
+}
+` + b.String()
+}
+
+func InstallSystemdScript(cfg *config.Config, services []string) string {
+	var b strings.Builder
+	b.WriteString("set -e\n")
+	for _, svc := range services {
+		unit := fmt.Sprintf("dolphinscheduler-%s", svc)
+		b.WriteString(fmt.Sprintf("sudo tee /etc/systemd/system/%s.service >/dev/null <<'EOF'\n", unit))
+		b.WriteString("[Unit]\n")
+		b.WriteString(fmt.Sprintf("Description=Apache DolphinScheduler %s\n", svc))
+		b.WriteString("After=network-online.target\nWants=network-online.target\n\n")
+		b.WriteString("[Service]\n")
+		b.WriteString("Type=forking\n")
+		b.WriteString(fmt.Sprintf("User=%s\n", cfg.Cluster.User))
+		b.WriteString(fmt.Sprintf("WorkingDirectory=%s\n", DSHome(cfg)))
+		b.WriteString(fmt.Sprintf("Environment=JAVA_HOME=%s\n", cfg.Cluster.JavaHome))
+		b.WriteString(fmt.Sprintf("ExecStart=%s/bin/dolphinscheduler-daemon.sh start %s\n", DSHome(cfg), svc))
+		b.WriteString(fmt.Sprintf("ExecStop=%s/bin/dolphinscheduler-daemon.sh stop %s\n", DSHome(cfg), svc))
+		b.WriteString("Restart=on-failure\nRestartSec=10\n\n")
+		b.WriteString("[Install]\nWantedBy=multi-user.target\nEOF\n")
+		b.WriteString(fmt.Sprintf("sudo systemctl daemon-reload\nsudo systemctl enable %s.service\n", unit))
+	}
+	return b.String()
+}
+
+func serviceMainPattern(service string) string {
+	switch service {
+	case "api-server":
+		return "ApiApplicationServer"
+	case "master-server":
+		return "MasterServer"
+	case "worker-server":
+		return "WorkerServer"
+	case "alert-server":
+		return "AlertServer"
+	default:
+		return service
+	}
 }
 
 func UninstallScript(cfg *config.Config, purgeData bool) string {
