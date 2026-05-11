@@ -44,3 +44,30 @@ func TestDolphinSchedulerEnvRendersMySQLAndZooKeeper(t *testing.T) {
 		}
 	}
 }
+
+func TestZooKeeperConnectStringUsesExternalValue(t *testing.T) {
+	cfg := config.Default()
+	cfg.ZooKeeper.ExternalConnectString = "zk1:2181,zk2:2181,zk3:2181"
+
+	got := ZooKeeperConnectString(&cfg)
+	if got != "zk1:2181,zk2:2181,zk3:2181" {
+		t.Fatalf("connect string = %q", got)
+	}
+}
+
+func TestZooKeeperConnectStringUsesDistributedRoles(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cluster.Mode = "distributed"
+	cfg.Hosts = []config.Host{
+		{Name: "ds1", Address: "10.0.0.1"},
+		{Name: "ds2", Address: "10.0.0.2"},
+		{Name: "ds3", Address: "10.0.0.3"},
+	}
+	cfg.Roles.ZooKeeper = []string{"ds1", "ds2", "ds3"}
+
+	got := ZooKeeperConnectString(&cfg)
+	want := "10.0.0.1:2181,10.0.0.2:2181,10.0.0.3:2181"
+	if got != want {
+		t.Fatalf("connect string = %q, want %q", got, want)
+	}
+}

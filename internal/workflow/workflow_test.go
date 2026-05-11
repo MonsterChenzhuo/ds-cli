@@ -23,3 +23,17 @@ func TestBootstrapCommands(t *testing.T) {
 		t.Fatalf("commands = %#v, want %#v", got, want)
 	}
 }
+
+func TestHostServicesUsesDistributedRoles(t *testing.T) {
+	cfg := config.Default()
+	cfg.Roles.API = []string{"ds1"}
+	cfg.Roles.Master = []string{"ds1", "ds2"}
+	cfg.Roles.Worker = []string{"ds2"}
+	cfg.Roles.Alert = []string{"ds1"}
+
+	got := HostServices(&cfg, "ds1")
+	want := []string{"api-server", "master-server", "alert-server"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("services = %#v, want %#v", got, want)
+	}
+}

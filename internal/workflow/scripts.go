@@ -112,6 +112,39 @@ EOF
 		home, cfg.Cluster.DataDir, cfg.Cluster.DataDir, cfg.ZooKeeper.ClientPort)
 }
 
+func ConfigureZooKeeperScript(cfg *config.Config, host string) string {
+	home := ZKHome(cfg)
+	myID := 1
+	for i, h := range cfg.Roles.ZooKeeper {
+		if h == host {
+			myID = i + 1
+			break
+		}
+	}
+	var servers strings.Builder
+	for i, name := range cfg.Roles.ZooKeeper {
+		h, ok := cfg.HostByName(name)
+		if !ok {
+			continue
+		}
+		servers.WriteString(fmt.Sprintf("server.%d=%s:2888:3888\n", i+1, h.Address))
+	}
+	return fmt.Sprintf(`set -e
+mkdir -p %q/conf %q/zookeeper/data %q/zookeeper/logs
+cat > %q/conf/zoo.cfg <<'EOF'
+tickTime=2000
+initLimit=10
+syncLimit=5
+dataDir=%s/zookeeper/data
+dataLogDir=%s/zookeeper/logs
+clientPort=%d
+admin.enableServer=false
+%sEOF
+printf '%%s\n' %d > %q/zookeeper/data/myid
+`, home, cfg.Cluster.DataDir, cfg.Cluster.DataDir, home,
+		cfg.Cluster.DataDir, cfg.Cluster.DataDir, cfg.ZooKeeper.ClientPort, servers.String(), myID, cfg.Cluster.DataDir)
+}
+
 func InstallDolphinSchedulerScript(cfg *config.Config) string {
 	dsSpec, _ := packages.DolphinSchedulerSpec(cfg.Versions.DolphinScheduler)
 	driver := packages.MySQLDriverSpec(cfg.Versions.MySQLDriver)
@@ -142,6 +175,10 @@ test -d %q
 cat > %q/bin/env/dolphinscheduler_env.sh <<'EOF'
 %sEOF
 `, DSHome(cfg), DSHome(cfg), render.DolphinSchedulerEnv(cfg))
+}
+
+func ConfigureDolphinSchedulerScript(cfg *config.Config) string {
+	return ConfigureScript(cfg)
 }
 
 func InitDBScript(cfg *config.Config) string {

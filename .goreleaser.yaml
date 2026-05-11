@@ -25,6 +25,7 @@ archives:
       - README.zh-CN.md
       - LICENSE
       - ds.yaml.example
+      - ds.distributed.yaml.example
       - skills/**/*
   - id: binary
     format: binary

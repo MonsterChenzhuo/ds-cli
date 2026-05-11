@@ -9,7 +9,7 @@ import (
 func newPreflightCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "preflight",
-		Short: "Check local prerequisites for pseudo-cluster deployment.",
+		Short: "Check prerequisites for pseudo-cluster or distributed deployment.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rc, err := prepare(cmd, "preflight")
 			if err != nil {
@@ -18,6 +18,10 @@ func newPreflightCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("preflight")
+			if rc.Cfg.Distributed() {
+				rc.runRemoteSameStep(ctx, e, "preflight", rc.Cfg.AllRoleHosts(), workflow.PreflightScript(rc.Cfg))
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "preflight", workflow.PreflightScript(rc.Cfg))
 			return finish(rc, e)
 		},
@@ -27,7 +31,7 @@ func newPreflightCmd() *cobra.Command {
 func newInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install Java, ZooKeeper, DolphinScheduler, and MySQL JDBC driver.",
+		Short: "Install Java, managed ZooKeeper, DolphinScheduler, and MySQL JDBC driver.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rc, err := prepare(cmd, "install")
 			if err != nil {
@@ -36,6 +40,18 @@ func newInstallCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("install")
+			if rc.Cfg.Distributed() {
+				hosts := rc.Cfg.AllRoleHosts()
+				if !rc.runRemoteSameStep(ctx, e, "install-java", hosts, workflow.InstallJavaScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if rc.Cfg.UsesManagedZooKeeper() &&
+					!rc.runRemoteSameStep(ctx, e, "install-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.InstallZooKeeperScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				rc.runRemoteSameStep(ctx, e, "install-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.InstallDolphinSchedulerScript(rc.Cfg))
+				return finish(rc, e)
+			}
 			for _, step := range []struct{ name, script string }{
 				{"install-java", workflow.InstallJavaScript(rc.Cfg)},
 				{"install-zookeeper", workflow.InstallZooKeeperScript(rc.Cfg)},
@@ -53,7 +69,7 @@ func newInstallCmd() *cobra.Command {
 func newConfigureCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "configure",
-		Short: "Render DolphinScheduler configuration for MySQL and ZooKeeper.",
+		Short: "Render DolphinScheduler and managed ZooKeeper configuration.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rc, err := prepare(cmd, "configure")
 			if err != nil {
@@ -62,6 +78,16 @@ func newConfigureCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("configure")
+			if rc.Cfg.Distributed() {
+				if rc.Cfg.UsesManagedZooKeeper() &&
+					!rc.runRemoteStep(ctx, e, "configure-zookeeper", rc.Cfg.Roles.ZooKeeper, func(host string) string {
+						return workflow.ConfigureZooKeeperScript(rc.Cfg, host)
+					}) {
+					return finish(rc, e)
+				}
+				rc.runRemoteSameStep(ctx, e, "configure-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.ConfigureDolphinSchedulerScript(rc.Cfg))
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "configure-dolphinscheduler", workflow.ConfigureScript(rc.Cfg))
 			return finish(rc, e)
 		},
@@ -80,6 +106,11 @@ func newInitDBCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("init-db")
+			if rc.Cfg.Distributed() {
+				host := rc.Cfg.Roles.API[0]
+				rc.runRemoteSameStep(ctx, e, "init-db", []string{host}, workflow.InitDBScript(rc.Cfg))
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "init-db", workflow.InitDBScript(rc.Cfg))
 			return finish(rc, e)
 		},
@@ -98,6 +129,16 @@ func newStartCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("start")
+			if rc.Cfg.Distributed() {
+				if rc.Cfg.UsesManagedZooKeeper() &&
+					!rc.runRemoteSameStep(ctx, e, "start-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.StartZooKeeperScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				for _, host := range rc.Cfg.ServiceHosts() {
+					rc.runRemoteSameStep(ctx, e, "start-dolphinscheduler", []string{host}, workflow.ServiceScript(rc.Cfg, "start", workflow.HostServices(rc.Cfg, host)))
+				}
+				return finish(rc, e)
+			}
 			if rc.runStep(ctx, e, "start-zookeeper", workflow.StartZooKeeperScript(rc.Cfg)) {
 				rc.runStep(ctx, e, "start-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "start", workflow.StartServices(rc.Cfg)))
 			}
@@ -118,6 +159,15 @@ func newStopCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("stop")
+			if rc.Cfg.Distributed() {
+				for _, host := range rc.Cfg.ServiceHosts() {
+					rc.runRemoteSameStep(ctx, e, "stop-dolphinscheduler", []string{host}, workflow.ServiceScript(rc.Cfg, "stop", workflow.HostServicesReverse(rc.Cfg, host)))
+				}
+				if rc.Cfg.UsesManagedZooKeeper() {
+					rc.runRemoteSameStep(ctx, e, "stop-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.StopZooKeeperScript(rc.Cfg))
+				}
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "stop-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "stop", workflow.StopServices(rc.Cfg)))
 			rc.runStep(ctx, e, "stop-zookeeper", workflow.StopZooKeeperScript(rc.Cfg))
 			return finish(rc, e)
@@ -137,6 +187,15 @@ func newStatusCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("status")
+			if rc.Cfg.Distributed() {
+				if rc.Cfg.UsesManagedZooKeeper() {
+					rc.runRemoteSameStep(ctx, e, "status-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.StatusZooKeeperScript(rc.Cfg))
+				}
+				for _, host := range rc.Cfg.ServiceHosts() {
+					rc.runRemoteSameStep(ctx, e, "status-dolphinscheduler", []string{host}, workflow.ServiceScript(rc.Cfg, "status", workflow.HostServices(rc.Cfg, host)))
+				}
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "status-zookeeper", workflow.StatusZooKeeperScript(rc.Cfg))
 			rc.runStep(ctx, e, "status-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "status", workflow.StartServices(rc.Cfg)))
 			return finish(rc, e)
@@ -157,6 +216,14 @@ func newUninstallCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("uninstall")
+			if rc.Cfg.Distributed() {
+				if rc.Cfg.UsesManagedZooKeeper() {
+					rc.runRemoteSameStep(ctx, e, "uninstall", rc.Cfg.AllRoleHosts(), workflow.UninstallScript(rc.Cfg, purgeData))
+				} else {
+					rc.runRemoteSameStep(ctx, e, "uninstall", rc.Cfg.ServiceHosts(), workflow.UninstallScript(rc.Cfg, purgeData))
+				}
+				return finish(rc, e)
+			}
 			rc.runStep(ctx, e, "uninstall", workflow.UninstallScript(rc.Cfg, purgeData))
 			return finish(rc, e)
 		},
@@ -177,6 +244,43 @@ func newBootstrapCmd() *cobra.Command {
 			ctx, cancel := commandCtx()
 			defer cancel()
 			e := rc.envelope("bootstrap")
+			if rc.Cfg.Distributed() {
+				if !rc.runRemoteSameStep(ctx, e, "preflight", rc.Cfg.AllRoleHosts(), workflow.PreflightScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if !rc.runRemoteSameStep(ctx, e, "install-java", rc.Cfg.AllRoleHosts(), workflow.InstallJavaScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if rc.Cfg.UsesManagedZooKeeper() {
+					if !rc.runRemoteSameStep(ctx, e, "install-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.InstallZooKeeperScript(rc.Cfg)) {
+						return finish(rc, e)
+					}
+					if !rc.runRemoteStep(ctx, e, "configure-zookeeper", rc.Cfg.Roles.ZooKeeper, func(host string) string {
+						return workflow.ConfigureZooKeeperScript(rc.Cfg, host)
+					}) {
+						return finish(rc, e)
+					}
+				}
+				if !rc.runRemoteSameStep(ctx, e, "install-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.InstallDolphinSchedulerScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if !rc.runRemoteSameStep(ctx, e, "configure-dolphinscheduler", rc.Cfg.ServiceHosts(), workflow.ConfigureDolphinSchedulerScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if !rc.runRemoteSameStep(ctx, e, "init-db", []string{rc.Cfg.Roles.API[0]}, workflow.InitDBScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				if rc.Cfg.UsesManagedZooKeeper() &&
+					!rc.runRemoteSameStep(ctx, e, "start-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.StartZooKeeperScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				for _, host := range rc.Cfg.ServiceHosts() {
+					if !rc.runRemoteSameStep(ctx, e, "start-dolphinscheduler", []string{host}, workflow.ServiceScript(rc.Cfg, "start", workflow.HostServices(rc.Cfg, host))) {
+						return finish(rc, e)
+					}
+				}
+				return finish(rc, e)
+			}
 			steps := []struct{ name, script string }{
 				{"preflight", workflow.PreflightScript(rc.Cfg)},
 				{"install-java", workflow.InstallJavaScript(rc.Cfg)},

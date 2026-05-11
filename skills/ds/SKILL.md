@@ -1,11 +1,11 @@
 ---
 name: ds
-description: 使用 ds-cli 在本机直接部署 Apache DolphinScheduler 3.4.1 伪集群；这是 dolphinscheduler-pseudo-cluster skill 的短命令别名，适合在 Claude Code 中输入 /ds 调用。
+description: 使用 ds-cli 部署 Apache DolphinScheduler 3.4.1，支持本机伪集群和多机分布式；这是 dolphinscheduler-pseudo-cluster skill 的短命令别名，适合在 Claude Code 中输入 /ds 调用。
 ---
 
 # ds-cli 快捷 Skill
 
-这是 `dolphinscheduler-pseudo-cluster` 的短别名。使用本 skill 时，按以下流程驱动 `ds-cli` 在当前机器直接部署 DolphinScheduler 3.4.1 伪集群。
+这是 `dolphinscheduler-pseudo-cluster` 的短别名。使用本 skill 时，按以下流程驱动 `ds-cli` 部署 DolphinScheduler 3.4.1。默认伪集群；用户要求完整分布式时生成分布式 `ds.yaml`。
 
 ## 工作流
 

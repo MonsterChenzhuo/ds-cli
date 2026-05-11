@@ -1,0 +1,45 @@
+cluster:
+  name: dolphinscheduler-distributed
+  mode: distributed
+  install_dir: /opt/ds-cli
+  data_dir: /data/ds-cli
+  user: dolphinscheduler
+  java_home: /opt/ds-cli/java
+
+versions:
+  dolphinscheduler: 3.4.1
+  zookeeper: 3.8.4
+  java: "11"
+  mysql_driver: 8.0.33
+
+mysql:
+  host: mysql.internal
+  port: 3306
+  database: dolphinscheduler
+  username: ds_user
+  password: ds_password
+  server_timezone: Asia/Shanghai
+  create_database: false
+
+zookeeper:
+  client_port: 2181
+  # 复用外部 ZooKeeper 时填写此项，并删除 roles.zookeeper：
+  # external_connect_string: zk1:2181,zk2:2181,zk3:2181
+
+ssh:
+  user: dolphinscheduler
+  private_key: ~/.ssh/id_rsa
+  port: 22
+  parallelism: 4
+
+hosts:
+  - { name: ds1, address: 10.0.0.1 }
+  - { name: ds2, address: 10.0.0.2 }
+  - { name: ds3, address: 10.0.0.3 }
+
+roles:
+  zookeeper: [ds1, ds2, ds3]
+  api_server: [ds1]
+  master_server: [ds1, ds2]
+  worker_server: [ds2, ds3]
+  alert_server: [ds1]

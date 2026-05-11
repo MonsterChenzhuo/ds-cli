@@ -1,12 +1,12 @@
 # ds-cli
 
-`ds-cli` 是面向 Claude Code 使用的单二进制 Go CLI，用于在当前机器直接部署 Apache DolphinScheduler 3.4.1 伪集群。它会安装或复用 JDK 11、安装 ZooKeeper、下载 DolphinScheduler 二进制包和 MySQL JDBC Driver，渲染 MySQL 元数据库配置，并执行数据库初始化与启停管理。
+`ds-cli` 是面向 Claude Code 使用的单二进制 Go CLI，用于部署 Apache DolphinScheduler 3.4.1。它支持本机伪集群和多机分布式两种模式，会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包和 MySQL JDBC Driver，渲染 MySQL 元数据库配置，并执行数据库初始化与启停管理。
 
 ## 范围
 
-- 部署模式：单机伪集群，`api-server`、`master-server`、`worker-server`、`alert-server` 都在本机。
+- 部署模式：单机伪集群或多机分布式。
 - DolphinScheduler：固定支持 `3.4.1`。
-- 注册中心：本机 ZooKeeper，默认 `localhost:2181`。
+- 注册中心：默认由 `ds-cli` 安装 ZooKeeper；分布式模式支持 `roles.zookeeper` 管理 1/3/5 节点 ZK，也支持 `zookeeper.external_connect_string` 复用外部 ZK。
 - 元数据库：使用用户提供的 MySQL。`ds-cli` 默认假设数据库和用户已存在；如果 `mysql.create_database: true`，会使用管理员账号通过本机 `mysql` CLI 创建数据库。
 - Java：如果 `cluster.java_home` 不存在，会优先复用系统 JDK 11，否则尝试通过 `apt-get`、`dnf`、`yum` 或 `brew` 安装 OpenJDK 11。
 
@@ -47,7 +47,7 @@ bin/ds-cli --help
 - `.github/workflows/ci.yml`：push/PR 时执行 `go vet`、`gofmt`、`go test -race`、构建和 skill front matter 检查。
 - `.github/workflows/release.yml`：推送到 `main` 时自动递增 patch tag；推送 `v*` tag 时由 GoReleaser 打包 `linux/darwin`、`amd64/arm64` release artifact。
 
-GoReleaser 会把 `README`、`LICENSE`、`ds.yaml.example` 和 `skills/**/*` 一起放入 tar.gz 包，供一键安装脚本安装。
+GoReleaser 会把 `README`、`LICENSE`、`ds.yaml.example`、`ds.distributed.yaml.example` 和 `skills/**/*` 一起放入 tar.gz 包，供一键安装脚本安装。
 
 安装后重启 Claude Code，输入 `/ds` 或 `/dolphinscheduler-pseudo-cluster` 应能看到对应 skill。
 
@@ -71,6 +71,48 @@ mysql:
 ```
 
 配置查找顺序为：`--config <path>` -> `$DSCLI_CONFIG` -> `./ds.yaml` -> `~/.ds-cli/ds.yaml`。
+
+### 分布式配置
+
+复制分布式示例：
+
+```bash
+cp ds.distributed.yaml.example ds.yaml
+```
+
+核心字段：
+
+```yaml
+cluster:
+  mode: distributed
+
+ssh:
+  user: dolphinscheduler
+  private_key: ~/.ssh/id_rsa
+  port: 22
+  parallelism: 4
+
+hosts:
+  - { name: ds1, address: 10.0.0.1 }
+  - { name: ds2, address: 10.0.0.2 }
+  - { name: ds3, address: 10.0.0.3 }
+
+roles:
+  zookeeper: [ds1, ds2, ds3]
+  api_server: [ds1]
+  master_server: [ds1, ds2]
+  worker_server: [ds2, ds3]
+  alert_server: [ds1]
+```
+
+复用外部 ZooKeeper 时：
+
+```yaml
+zookeeper:
+  external_connect_string: zk1:2181,zk2:2181,zk3:2181
+```
+
+设置后 `ds-cli` 不会安装、配置、启动或停止 ZooKeeper，只会把该连接串写入 DolphinScheduler 配置。
 
 ## 部署
 

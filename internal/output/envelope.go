@@ -7,6 +7,7 @@ import (
 
 type StepResult struct {
 	Name      string `json:"name"`
+	Host      string `json:"host,omitempty"`
 	OK        bool   `json:"ok"`
 	ElapsedMs int64  `json:"elapsed_ms"`
 	Message   string `json:"message,omitempty"`

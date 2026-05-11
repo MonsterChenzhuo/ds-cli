@@ -1,14 +1,14 @@
 # CLAUDE.md
 
-本仓库是 `ds-cli`：一个面向 Claude Code 使用的单二进制 Go CLI，用于在当前机器直接部署 Apache DolphinScheduler 3.4.1 伪集群。
+本仓库是 `ds-cli`：一个面向 Claude Code 使用的单二进制 Go CLI，用于部署 Apache DolphinScheduler 3.4.1，支持本机伪集群和多机分布式两种模式。
 
 ## 项目范围
 
-- v1 只支持本机直接部署，不做 SSH inventory，也不复用 `hadoop-cli` 的远程 orchestrator。
-- 部署目标是 DolphinScheduler 3.4.1 伪集群：`api-server`、`master-server`、`worker-server`、`alert-server` 都在本机。
-- 注册中心使用本机 ZooKeeper。
+- 伪集群模式：`api-server`、`master-server`、`worker-server`、`alert-server` 都在本机。
+- 分布式模式：通过 `hosts`、`ssh`、`roles` 在多台 Linux/macOS 机器上部署 DolphinScheduler 服务。
+- 注册中心默认由 `ds-cli` 安装 ZooKeeper；分布式模式允许用户通过 `zookeeper.external_connect_string` 复用外部 ZooKeeper。
 - 元数据库使用用户提供的 MySQL；默认假设库和账号已存在，只有配置 `mysql.create_database: true` 时才用管理员账号创建数据库。
-- CLI 会安装或复用 JDK 11、安装 ZooKeeper、下载 DolphinScheduler 二进制包、下载 MySQL JDBC Driver、渲染配置并执行库表初始化。
+- CLI 会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包、下载 MySQL JDBC Driver、渲染配置并执行库表初始化。
 
 ## 常用命令
 
@@ -62,6 +62,7 @@ GitHub Actions：
 ```text
 ds-cli_<version>_linux_amd64.tar.gz
 ds-cli_<version>_checksums.txt
+ds.distributed.yaml.example
 skills/ds/SKILL.md
 skills/dolphinscheduler-pseudo-cluster/SKILL.md
 ```
@@ -73,6 +74,7 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - `internal/config`：加载 `ds.yaml`、合并默认值、校验配置。
 - `internal/workflow`：生成本机部署需要的 bash 脚本，要求尽量幂等。
 - `internal/local`：通过 `bash -lc` 执行步骤，记录每个步骤的 stdout/stderr。
+- `internal/remote`：SSH client、连接池和远程 runner；分布式模式使用它在 hosts 上并发执行任务。
 - `internal/output`：定义 stdout JSON envelope。
 - `internal/packages`：维护 DolphinScheduler、ZooKeeper、MySQL Driver 下载地址。
 - `internal/render`：渲染 `dolphinscheduler_env.sh` 等配置内容。
@@ -100,6 +102,7 @@ skills/dolphinscheduler-pseudo-cluster/SKILL.md
 - `internal/config/types.go`
 - `internal/config/load.go`
 - `ds.yaml.example`
+- `ds.distributed.yaml.example`
 - `README.zh-CN.md`
 - `skills/dolphinscheduler-pseudo-cluster/SKILL.md`
 - `skills/ds/SKILL.md`
@@ -132,7 +135,7 @@ cp -R ~/.ds-cli/skills/* ~/.claude/skills/
 
 ## 开发注意事项
 
-- 保持本机部署边界，除非明确要求，不要加入 SSH、多节点 inventory 或 agent 逻辑。
+- 分布式模式参考 `hadoop-cli` 的 inventory + SSH runner 思路，但 DolphinScheduler 角色使用 `zookeeper/api_server/master_server/worker_server/alert_server`。
 - 生命周期命令应保持幂等：重复执行 `install/configure/start` 不应破坏已有部署。
 - 不要把 `bin/`、`dist/` 等构建产物提交到仓库。
 - 修改安装脚本后必须执行 `bash -n scripts/install.sh`，必要时用临时目录验证 `PREFIX` 和 `SKILL_DIR`。

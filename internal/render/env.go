@@ -28,8 +28,24 @@ func DolphinSchedulerEnv(cfg *config.Config) string {
 		"export SPRING_CACHE_TYPE=${SPRING_CACHE_TYPE:-none}",
 		"export SPRING_JACKSON_TIME_ZONE=${SPRING_JACKSON_TIME_ZONE:-UTC}",
 		"export REGISTRY_TYPE=${REGISTRY_TYPE:-zookeeper}",
-		fmt.Sprintf("export REGISTRY_ZOOKEEPER_CONNECT_STRING=${REGISTRY_ZOOKEEPER_CONNECT_STRING:-localhost:%d}", cfg.ZooKeeper.ClientPort),
+		fmt.Sprintf("export REGISTRY_ZOOKEEPER_CONNECT_STRING=${REGISTRY_ZOOKEEPER_CONNECT_STRING:-%s}", ZooKeeperConnectString(cfg)),
 		"export PATH=$JAVA_HOME/bin:$PATH",
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func ZooKeeperConnectString(cfg *config.Config) string {
+	if cfg.ZooKeeper.ExternalConnectString != "" {
+		return cfg.ZooKeeper.ExternalConnectString
+	}
+	if !cfg.Distributed() {
+		return fmt.Sprintf("localhost:%d", cfg.ZooKeeper.ClientPort)
+	}
+	var parts []string
+	for _, name := range cfg.Roles.ZooKeeper {
+		if h, ok := cfg.HostByName(name); ok {
+			parts = append(parts, fmt.Sprintf("%s:%d", h.Address, cfg.ZooKeeper.ClientPort))
+		}
+	}
+	return strings.Join(parts, ",")
 }

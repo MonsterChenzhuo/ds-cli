@@ -18,6 +18,7 @@ func Default() Config {
 			DataDir:    "/data/ds-cli",
 			User:       "dolphinscheduler",
 			JavaHome:   "/opt/ds-cli/java",
+			Mode:       "pseudo",
 		},
 		Versions: Versions{
 			DolphinScheduler: "3.4.1",
@@ -35,6 +36,7 @@ func Default() Config {
 		ZooKeeper: ZooKeeper{ClientPort: 2181},
 		API:       API{Port: 12345},
 		Services:  Services{API: true, Master: true, Worker: true, Alert: true},
+		SSH:       SSH{Port: 22, Parallelism: 4},
 	}
 }
 
@@ -106,6 +108,76 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.MySQL.CreateDatabase && strings.TrimSpace(cfg.MySQL.AdminUsername) == "" {
 		return fmt.Errorf("mysql.admin_username is required when mysql.create_database is true")
+	}
+	if cfg.Cluster.Mode != "" && cfg.Cluster.Mode != "pseudo" && cfg.Cluster.Mode != "distributed" {
+		return fmt.Errorf("cluster.mode must be pseudo or distributed")
+	}
+	if cfg.Distributed() {
+		if err := validateDistributed(cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDistributed(cfg *Config) error {
+	var msgs []string
+	add := func(s string) { msgs = append(msgs, s) }
+	if cfg.Cluster.Mode == "" {
+		cfg.Cluster.Mode = "distributed"
+	}
+	if len(cfg.Hosts) == 0 {
+		add("hosts must not be empty in distributed mode")
+	}
+	if strings.TrimSpace(cfg.SSH.User) == "" {
+		add("ssh.user is required in distributed mode")
+	}
+	if strings.TrimSpace(cfg.SSH.PrivateKey) == "" {
+		add("ssh.private_key is required in distributed mode")
+	}
+	hostNames := map[string]bool{}
+	for _, h := range cfg.Hosts {
+		if h.Name == "" || h.Address == "" {
+			add(fmt.Sprintf("hosts entry missing name or address: %+v", h))
+			continue
+		}
+		if hostNames[h.Name] {
+			add(fmt.Sprintf("duplicate host name %q", h.Name))
+		}
+		hostNames[h.Name] = true
+	}
+	for role, hosts := range map[string][]string{
+		"zookeeper":     cfg.Roles.ZooKeeper,
+		"api_server":    cfg.Roles.API,
+		"master_server": cfg.Roles.Master,
+		"worker_server": cfg.Roles.Worker,
+		"alert_server":  cfg.Roles.Alert,
+	} {
+		for _, name := range hosts {
+			if !hostNames[name] {
+				add(fmt.Sprintf("roles.%s references unknown host %q", role, name))
+			}
+		}
+	}
+	if len(cfg.Roles.API) == 0 {
+		add("roles.api_server must not be empty in distributed mode")
+	}
+	if len(cfg.Roles.Master) == 0 {
+		add("roles.master_server must not be empty in distributed mode")
+	}
+	if len(cfg.Roles.Worker) == 0 {
+		add("roles.worker_server must not be empty in distributed mode")
+	}
+	if len(cfg.Roles.Alert) == 0 {
+		add("roles.alert_server must not be empty in distributed mode")
+	}
+	if cfg.UsesManagedZooKeeper() {
+		if n := len(cfg.Roles.ZooKeeper); n == 0 || n%2 == 0 {
+			add(fmt.Sprintf("roles.zookeeper must have an odd number of hosts when zookeeper.external_connect_string is empty; got %d", n))
+		}
+	}
+	if len(msgs) > 0 {
+		return errors.New(strings.Join(msgs, "; "))
 	}
 	return nil
 }

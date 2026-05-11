@@ -1,5 +1,6 @@
 cluster:
   name: dolphinscheduler-pseudo
+  mode: pseudo # pseudo 或 distributed
   install_dir: /opt/ds-cli
   data_dir: /data/ds-cli
   user: dolphinscheduler
@@ -25,6 +26,8 @@ mysql:
 
 zookeeper:
   client_port: 2181
+  # 分布式模式也可以复用外部 ZooKeeper；设置后 ds-cli 不会安装/启动 ZK。
+  # external_connect_string: zk1:2181,zk2:2181,zk3:2181
 
 api:
   port: 12345
@@ -34,3 +37,22 @@ services:
   master: true
   worker: true
   alert: true
+
+# 分布式模式示例。取消注释后，ds-cli 会通过 SSH 在多台机器部署。
+# ssh:
+#   user: dolphinscheduler
+#   private_key: ~/.ssh/id_rsa
+#   port: 22
+#   parallelism: 4
+#
+# hosts:
+#   - { name: ds1, address: 10.0.0.1 }
+#   - { name: ds2, address: 10.0.0.2 }
+#   - { name: ds3, address: 10.0.0.3 }
+#
+# roles:
+#   zookeeper: [ds1, ds2, ds3] # 未配置 external_connect_string 时必须为奇数
+#   api_server: [ds1]
+#   master_server: [ds1, ds2]
+#   worker_server: [ds2, ds3]
+#   alert_server: [ds1]
