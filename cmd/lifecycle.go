@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/ds-cli/ds-cli/internal/output"
 	"github.com/ds-cli/ds-cli/internal/workflow"
 	"github.com/spf13/cobra"
@@ -212,6 +214,59 @@ func newStopCmd() *cobra.Command {
 			}
 			rc.runStep(ctx, e, "stop-dolphinscheduler", workflow.ServiceScript(rc.Cfg, "stop", workflow.StopServices(rc.Cfg)))
 			rc.runStep(ctx, e, "stop-zookeeper", workflow.StopZooKeeperScript(rc.Cfg))
+			return finish(rc, e)
+		},
+	}
+}
+
+func newRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart [component...]",
+		Short: "Restart specified components: api, master, worker, alert, zookeeper, or all.",
+		Args:  cobra.MinimumNArgs(1),
+		Example: `  ds-cli restart worker
+  ds-cli restart api worker
+  ds-cli restart zookeeper
+  ds-cli restart all`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rc, err := prepare(cmd, "restart")
+			if err != nil {
+				return err
+			}
+			restartZooKeeper, services, err := workflow.RestartTargets(rc.Cfg, args)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := commandCtx()
+			defer cancel()
+			e := rc.envelope("restart")
+			if rc.Cfg.Distributed() {
+				if restartZooKeeper && rc.Cfg.UsesManagedZooKeeper() &&
+					!rc.runRemoteSameStep(ctx, e, "restart-zookeeper", rc.Cfg.Roles.ZooKeeper, workflow.RestartZooKeeperScript(rc.Cfg)) {
+					return finish(rc, e)
+				}
+				for _, host := range rc.Cfg.ServiceHosts() {
+					hostServices := workflow.SelectServices(workflow.HostServices(rc.Cfg, host), services)
+					if len(hostServices) == 0 {
+						continue
+					}
+					if !rc.runRemoteSameStep(ctx, e, "restart-dolphinscheduler", []string{host}, workflow.RestartServiceScript(rc.Cfg, hostServices)) {
+						return finish(rc, e)
+					}
+				}
+				return finish(rc, e)
+			}
+			if restartZooKeeper && !rc.runStep(ctx, e, "restart-zookeeper", workflow.RestartZooKeeperScript(rc.Cfg)) {
+				return finish(rc, e)
+			}
+			if len(services) > 0 {
+				available := workflow.StartServices(rc.Cfg)
+				selected := workflow.SelectServices(available, services)
+				if len(selected) != len(services) {
+					return fmt.Errorf("some requested services are disabled in config: %v", services)
+				}
+				rc.runStep(ctx, e, "restart-dolphinscheduler", workflow.RestartServiceScript(rc.Cfg, selected))
+			}
 			return finish(rc, e)
 		},
 	}

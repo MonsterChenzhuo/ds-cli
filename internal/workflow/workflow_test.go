@@ -48,6 +48,55 @@ func TestAPIWorkerServices(t *testing.T) {
 	}
 }
 
+func TestRestartTargetsResolveAliases(t *testing.T) {
+	cfg := config.Default()
+	restartZooKeeper, services, err := RestartTargets(&cfg, []string{"api", "worker-server", "zk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restartZooKeeper {
+		t.Fatal("expected zookeeper restart")
+	}
+	want := []string{"api-server", "worker-server"}
+	if !reflect.DeepEqual(services, want) {
+		t.Fatalf("services = %#v, want %#v", services, want)
+	}
+}
+
+func TestRestartTargetsAllUsesConfiguredServices(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services.Alert = false
+	restartZooKeeper, services, err := RestartTargets(&cfg, []string{"all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restartZooKeeper {
+		t.Fatal("expected managed zookeeper restart")
+	}
+	want := []string{"api-server", "master-server", "worker-server"}
+	if !reflect.DeepEqual(services, want) {
+		t.Fatalf("services = %#v, want %#v", services, want)
+	}
+}
+
+func TestRestartTargetsRejectExternalZooKeeper(t *testing.T) {
+	cfg := config.Default()
+	cfg.ZooKeeper.ExternalConnectString = "zk1:2181"
+	if _, _, err := RestartTargets(&cfg, []string{"zookeeper"}); err == nil {
+		t.Fatal("expected external zookeeper restart to fail")
+	}
+}
+
+func TestSelectServicesKeepsHostOrder(t *testing.T) {
+	available := []string{"api-server", "master-server", "worker-server", "alert-server"}
+	requested := []string{"worker-server", "api-server"}
+	got := SelectServices(available, requested)
+	want := []string{"api-server", "worker-server"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("services = %#v, want %#v", got, want)
+	}
+}
+
 func TestInstallTaskPluginsScriptUsesOfficialInstaller(t *testing.T) {
 	cfg := config.Default()
 	got := InstallTaskPluginsScript(&cfg)

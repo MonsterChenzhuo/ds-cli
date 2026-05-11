@@ -44,6 +44,7 @@ ds-cli bootstrap
 - `steps[].ok: false` 表示某个步骤失败。
 - 失败时读取 `~/.ds-cli/runs/<run-id>/<step>.stderr`。
 - `status` 会逐服务核对进程，worker 缺失时必须视为失败。
+- 需要按组件重启时，使用 `ds-cli restart worker`、`ds-cli restart api worker`、`ds-cli restart zookeeper` 或 `ds-cli restart all`；分布式模式会根据 `roles` 自动定位主机。
 
 ## 默认登录
 

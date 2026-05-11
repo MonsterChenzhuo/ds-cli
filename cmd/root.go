@@ -23,6 +23,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newInitDBCmd())
 	root.AddCommand(newStartCmd())
 	root.AddCommand(newStopCmd())
+	root.AddCommand(newRestartCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSystemdCmd())
 	root.AddCommand(newUninstallCmd())

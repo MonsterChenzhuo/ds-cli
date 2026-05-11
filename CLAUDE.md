@@ -132,6 +132,19 @@ ds-cli plugins --restart
 
 该命令会重写 `conf/plugins_config`，执行官方插件安装脚本，校验 `dolphinscheduler-task-shell-3.4.1.jar`、`dolphinscheduler-task-python-3.4.1.jar` 是否存在，并重启 `api-server`、`worker-server`。
 
+指定组件重启：
+
+```bash
+ds-cli restart worker
+ds-cli restart api worker
+ds-cli restart zookeeper
+ds-cli restart all
+```
+
+- 支持组件别名：`api`/`api-server`、`master`/`master-server`、`worker`/`worker-server`、`alert`/`alert-server`、`zk`/`zookeeper`、`all`。
+- 分布式模式根据 `roles` 只在对应机器重启对应服务。
+- 配置外部 ZooKeeper 时，不允许通过 `ds-cli restart zookeeper` 重启，避免误操作不归 ds-cli 管理的集群。
+
 服务静默退出的长期方案：
 
 ```bash

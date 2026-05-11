@@ -169,6 +169,10 @@ admin / dolphinscheduler123
 ```bash
 ds-cli stop
 ds-cli start
+ds-cli restart worker
+ds-cli restart api worker
+ds-cli restart zookeeper
+ds-cli restart all
 ds-cli status
 ds-cli plugins --restart
 ds-cli systemd
@@ -177,6 +181,8 @@ ds-cli uninstall --purge-data
 ```
 
 `--purge-data` 会删除 `cluster.data_dir`，谨慎使用。
+
+`ds-cli restart <组件...>` 支持按组件重启，组件名可写短名或服务名：`api`/`api-server`、`master`/`master-server`、`worker`/`worker-server`、`alert`/`alert-server`、`zk`/`zookeeper`、`all`。分布式模式会根据 `roles` 只在对应机器执行；如果配置的是外部 ZooKeeper，`ds-cli restart zookeeper` 会直接失败，避免误操作外部集群。
 
 `ds-cli status` 会逐服务检查 `ApiApplicationServer`、`MasterServer`、`WorkerServer`、`AlertServer` 进程，任一声明服务缺失都会返回失败。
 

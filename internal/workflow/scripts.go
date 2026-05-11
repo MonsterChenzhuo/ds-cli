@@ -252,6 +252,14 @@ export JAVA_HOME=%q
 `, cfg.Cluster.JavaHome, ZKHome(cfg))
 }
 
+func RestartZooKeeperScript(cfg *config.Config) string {
+	return fmt.Sprintf(`set -e
+export JAVA_HOME=%q
+%q/bin/zkServer.sh stop || true
+%q/bin/zkServer.sh start
+`, cfg.Cluster.JavaHome, ZKHome(cfg), ZKHome(cfg))
+}
+
 func StatusZooKeeperScript(cfg *config.Config) string {
 	return fmt.Sprintf(`set -e
 export JAVA_HOME=%q
