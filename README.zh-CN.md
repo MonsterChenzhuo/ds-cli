@@ -11,6 +11,7 @@
 - 任务插件：默认按官方流程写入 `conf/plugins_config`，执行 `bash ./bin/install-plugins.sh 3.4.1`，安装 `dolphinscheduler-task-shell` 和 `dolphinscheduler-task-python` 到 `$DOLPHINSCHEDULER_HOME/plugins/task-plugins/`。
 - Java：如果 `cluster.java_home` 不存在，会优先复用系统 JDK 11，否则尝试通过 `apt-get`、`dnf`、`yum` 或 `brew` 安装 OpenJDK 11。
 - 环境变量：支持通过 `env` 配置块写入 `dolphinscheduler_env.sh`，例如 `PYTHON_LAUNCHER`、`HADOOP_USER_NAME`、运行时 `JAVA_HOME`、`HADOOP_HOME` 和 `PATH` 前缀。
+- API 管理：支持像 `spark-cli` 一样配置命名 DS API 集群，并通过 REST API 创建项目、创建单任务工作流、上线/下线/删除任务、配置调度、告警组和 DS 环境。
 
 ## 安装
 
@@ -194,6 +195,88 @@ http://localhost:12345/dolphinscheduler/ui
 ```text
 admin / dolphinscheduler123
 ```
+
+## API 管理
+
+部署完成后，可以把 DolphinScheduler API 地址和凭据保存成命名集群 profile。该配置独立于部署用的 `ds.yaml`，默认写入 `~/.config/ds-cli/config.yaml`：
+
+```bash
+ds-cli config cluster add local \
+  --api-url http://localhost:12345/dolphinscheduler \
+  --user admin \
+  --password dolphinscheduler123 \
+  --activate
+
+ds-cli config cluster list
+```
+
+也可以不用本地 profile，直接通过环境变量或命令行参数指定：
+
+```bash
+export DSCLI_API_URL=http://localhost:12345/dolphinscheduler
+export DSCLI_TOKEN=<access-token>
+
+ds-cli project list
+```
+
+认证优先级为：`--token` / `DSCLI_TOKEN`、`--session-id` / `DSCLI_SESSION_ID`、`--user` + `--password` / `DSCLI_USER` + `DSCLI_PASSWORD`。密码登录会先调用 `/login` 获取 `sessionId`，后续请求自动携带 header。
+
+### 项目
+
+```bash
+ds-cli project create demo --description "created by ds-cli"
+ds-cli project list
+ds-cli project get <project-code>
+ds-cli project delete <project-code>
+```
+
+### 单任务工作流
+
+`task create` 会创建一个包含单个 `SHELL` 或 `PYTHON` 节点的离线工作流定义，适合 agent 快速开发任务。返回的 JSON 中包含 DolphinScheduler API 的原始响应，可从中读取 workflow code。
+
+```bash
+ds-cli task create extract_orders \
+  --project-code <project-code> \
+  --workflow-name daily_extract_orders \
+  --type SHELL \
+  --script-file ./extract_orders.sh
+
+ds-cli task online <workflow-code> --project-code <project-code>
+ds-cli task offline <workflow-code> --project-code <project-code>
+ds-cli task delete <workflow-code>
+```
+
+需要管理普通工作流定义时，可使用 `workflow` 命令：
+
+```bash
+ds-cli workflow create daily_job --project-code <project-code>
+ds-cli workflow online <workflow-code> --project-code <project-code>
+ds-cli workflow offline <workflow-code> --project-code <project-code>
+ds-cli workflow delete <workflow-code>
+```
+
+### 调度、告警和环境
+
+```bash
+ds-cli schedule create \
+  --workflow-code <workflow-code> \
+  --crontab "0 0 2 * * ? *" \
+  --start-time "2026-01-01 00:00:00" \
+  --end-time "2099-01-01 00:00:00" \
+  --timezone Asia/Shanghai \
+  --warning-type FAILURE \
+  --warning-group-id <alert-group-id>
+
+ds-cli schedule online <schedule-id> --project-code <project-code>
+ds-cli schedule offline <schedule-id> --project-code <project-code>
+
+ds-cli alert group create ops --alert-instance-ids 1,2
+ds-cli environment create python3 \
+  --env-config "export PYTHON_LAUNCHER=/usr/bin/python3" \
+  --worker-groups default
+```
+
+所有新增 API 命令 stdout 仍输出 JSON envelope；stderr 不输出自由文本，便于 Codex 或脚本直接解析。
 
 ## 运维
 

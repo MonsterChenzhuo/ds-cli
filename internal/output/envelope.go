@@ -23,6 +23,7 @@ type Envelope struct {
 	Command    string         `json:"command"`
 	OK         bool           `json:"ok"`
 	Summary    map[string]any `json:"summary,omitempty"`
+	Data       any            `json:"data,omitempty"`
 	Steps      []StepResult   `json:"steps,omitempty"`
 	Error      *EnvelopeError `json:"error,omitempty"`
 	RunID      string         `json:"run_id,omitempty"`

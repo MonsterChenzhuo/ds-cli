@@ -4,6 +4,8 @@
 
 Task plugins are installed through DolphinScheduler's official flow: render `conf/plugins_config`, run `bash ./bin/install-plugins.sh 3.4.1`, and verify the configured jars under `plugins/task-plugins/`.
 
+It also includes REST API helpers for post-deploy operations: named DS API cluster profiles, project creation, single-task workflow creation, workflow online/offline/delete, schedules, alert groups, and environments. See the Chinese README for full command examples.
+
 ## Install
 
 ```bash

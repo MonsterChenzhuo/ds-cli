@@ -17,6 +17,7 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().Bool("no-color", false, "disable color in stderr progress output")
 
 	root.AddCommand(newPreflightCmd())
+	root.AddCommand(newConfigCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newPluginsCmd())
 	root.AddCommand(newConfigureCmd())
@@ -28,5 +29,11 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newSystemdCmd())
 	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newBootstrapCmd())
+	root.AddCommand(newProjectCmd())
+	root.AddCommand(newWorkflowCmd())
+	root.AddCommand(newTaskCmd())
+	root.AddCommand(newScheduleCmd())
+	root.AddCommand(newAlertCmd())
+	root.AddCommand(newEnvironmentCmd())
 	return root
 }

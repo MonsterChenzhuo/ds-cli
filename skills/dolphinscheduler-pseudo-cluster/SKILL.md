@@ -61,6 +61,33 @@ http://localhost:12345/dolphinscheduler/ui
 admin / dolphinscheduler123
 ```
 
+## API 管理
+
+部署完成后可配置命名 API 集群，后续命令会通过 DolphinScheduler REST API 操作项目、任务、调度、告警和环境：
+
+```bash
+ds-cli config cluster add local \
+  --api-url http://localhost:12345/dolphinscheduler \
+  --user admin \
+  --password dolphinscheduler123 \
+  --activate
+```
+
+常用命令：
+
+```bash
+ds-cli project create demo --description "created by ds-cli"
+ds-cli task create extract --project-code <project-code> --workflow-name daily_extract --script-file ./extract.sh
+ds-cli task online <workflow-code> --project-code <project-code>
+ds-cli task offline <workflow-code> --project-code <project-code>
+ds-cli task delete <workflow-code>
+ds-cli schedule create --workflow-code <workflow-code> --crontab "0 0 2 * * ? *" --start-time "2026-01-01 00:00:00" --end-time "2099-01-01 00:00:00"
+ds-cli alert group create ops --alert-instance-ids 1,2
+ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/python3"
+```
+
+也可用 `DSCLI_API_URL`、`DSCLI_TOKEN`、`DSCLI_SESSION_ID`、`DSCLI_USER`、`DSCLI_PASSWORD` 临时覆盖 profile。新增 API 命令 stdout 输出 JSON envelope。
+
 ## 注意
 
 - DolphinScheduler 3.4.1 的二进制包不包含插件依赖；`ds-cli` 会使用官方 `install-plugins.sh` 安装 `shell`、`python` task 插件，并放置 MySQL JDBC Driver 用于元数据库初始化。
