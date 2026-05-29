@@ -5,7 +5,9 @@
 # Env overrides:
 #   VERSION=v0.1.0        pin a specific release (default: latest)
 #   PREFIX=/usr/local/bin install directory for the binary
-#   SKILL_DIR=~/.claude/skills  install directory for bundled Claude Code skills
+#   SKILL_DIR=~/.Codex/skills   install bundled skills to one directory
+#   SKILL_DIRS=dir1:dir2        install bundled skills to multiple directories
+#   NO_SKILL=1             skip bundled skill installation
 #   NO_SUDO=1             never use sudo; fail if PREFIX is not writable
 #   REPO=MonsterChenzhuo/ds-cli  override repo slug
 
@@ -13,8 +15,14 @@ set -euo pipefail
 
 REPO="${REPO:-MonsterChenzhuo/ds-cli}"
 PREFIX="${PREFIX:-/usr/local/bin}"
-SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills}"
 VERSION="${VERSION:-}"
+if [ -z "${SKILL_DIRS:-}" ]; then
+  if [ -n "${SKILL_DIR:-}" ]; then
+    SKILL_DIRS="$SKILL_DIR"
+  else
+    SKILL_DIRS="$HOME/.Codex/skills:$HOME/.claude/skills"
+  fi
+fi
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
@@ -98,10 +106,14 @@ info "installing binary to ${PREFIX}/ds-cli"
 $sudo_cmd install -d "$PREFIX"
 $sudo_cmd install -m 0755 "${tmpdir}/ds-cli" "${PREFIX}/ds-cli"
 
-if [ -d "${tmpdir}/skills" ]; then
-  info "installing skills to ${SKILL_DIR}"
-  mkdir -p "$SKILL_DIR"
-  (cd "${tmpdir}/skills" && tar -cf - .) | (cd "$SKILL_DIR" && tar -xf -)
+if [ "${NO_SKILL:-0}" != "1" ] && [ -d "${tmpdir}/skills" ]; then
+  IFS=':' read -r -a skill_dirs <<<"$SKILL_DIRS"
+  for skill_dir in "${skill_dirs[@]}"; do
+    [ -n "$skill_dir" ] || continue
+    info "installing skills to ${skill_dir}"
+    mkdir -p "$skill_dir"
+    (cd "${tmpdir}/skills" && tar -cf - .) | (cd "$skill_dir" && tar -xf -)
+  done
 fi
 
 if [ -f "${tmpdir}/ds.yaml.example" ]; then

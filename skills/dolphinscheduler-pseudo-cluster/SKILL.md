@@ -1,11 +1,13 @@
 ---
 name: dolphinscheduler-pseudo-cluster
-description: 使用 ds-cli 部署 Apache DolphinScheduler 3.4.1，支持本机伪集群和多机分布式；适用于“部署 dolphinscheduler”“安装 DS 3.4.1”“初始化 DolphinScheduler MySQL 元数据库”等请求。
+description: 使用 ds-cli 为 Codex/Claude Code 部署和操作 Apache DolphinScheduler 3.4.1，支持本机伪集群、多机分布式和 DS REST API 项目/任务/调度/告警/环境管理；适用于“部署 dolphinscheduler”“安装 DS 3.4.1”“初始化 DolphinScheduler MySQL 元数据库”“创建 DS 任务”等请求。
 ---
 
 # DolphinScheduler 3.4.1 部署
 
-本 skill 使用 `ds-cli` 部署 DolphinScheduler 3.4.1。默认本机伪集群；用户要求“完整分布式/多机/集群部署”时，生成包含 `hosts`、`ssh`、`roles` 的 `ds.yaml`。
+本 skill 使用 `ds-cli` 部署和操作 DolphinScheduler 3.4.1。`ds-cli` 是给 Codex/Claude Code 调用的非交互式工具：不要等待 prompt，提前准备 YAML、flag、环境变量或脚本文件；stdout 只解析 JSON envelope，stderr 只作为进度和排障信息。
+
+默认本机伪集群；用户要求“完整分布式/多机/集群部署”时，生成包含 `hosts`、`ssh`、`roles` 的 `ds.yaml`。
 
 ## 工作流
 
@@ -39,13 +41,14 @@ ds-cli bootstrap
 
 ## 结果判断
 
-每条命令 stdout 会输出 JSON envelope：
+每条命令 stdout 会输出 JSON envelope，agent 应只解析 stdout：
 
 - `ok: true` 表示命令成功。
 - `steps[].ok: false` 表示某个步骤失败。
 - 失败时读取 `~/.ds-cli/runs/<run-id>/<step>.stderr`。
 - `status` 会逐服务核对进程，worker 缺失时必须视为失败。
 - 需要按组件重启时，使用 `ds-cli restart worker`、`ds-cli restart api worker`、`ds-cli restart zookeeper` 或 `ds-cli restart all`；分布式模式会根据 `roles` 自动定位主机。
+- API 命令失败时读取 envelope 的 `error` 和 DolphinScheduler 原始 `data`；不要把 stderr 当成结果数据。
 
 ## 默认登录
 

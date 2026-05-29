@@ -71,6 +71,37 @@ func TestConfigClusterAddWritesProfile(t *testing.T) {
 	}
 }
 
+func TestAPICommandConfigErrorWritesEnvelope(t *testing.T) {
+	t.Setenv("DSCLI_CONFIG_DIR", t.TempDir())
+	t.Setenv("DSCLI_API_URL", "")
+	t.Setenv("DSCLI_TOKEN", "")
+	t.Setenv("DSCLI_SESSION_ID", "")
+	t.Setenv("DSCLI_USER", "")
+	t.Setenv("DSCLI_PASSWORD", "")
+
+	out, err := executeRoot(t, "project", "list")
+	if err == nil {
+		t.Fatal("project list returned nil error without API profile")
+	}
+	var envelope struct {
+		Command string `json:"command"`
+		OK      bool   `json:"ok"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+	}
+	if envelope.Command != "project.list" || envelope.OK {
+		t.Fatalf("unexpected envelope: %+v", envelope)
+	}
+	if envelope.Error.Code != "CONFIG_ERROR" || !strings.Contains(envelope.Error.Message, "api_url is required") {
+		t.Fatalf("unexpected error envelope: %+v", envelope.Error)
+	}
+}
+
 func TestProjectCreatePostsToDolphinSchedulerAPI(t *testing.T) {
 	var sawToken string
 	var sawBody map[string]any

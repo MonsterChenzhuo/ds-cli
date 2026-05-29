@@ -73,17 +73,22 @@ func writeAPIResponse(cmd *cobra.Command, command string, profile dsapi.Profile,
 	return e.Write(cmd.OutOrStdout())
 }
 
+func writeAPIError(cmd *cobra.Command, command, code string, err error) {
+	e := output.NewEnvelope(command).WithError(output.EnvelopeError{Code: code, Message: err.Error()})
+	_ = e.Write(cmd.OutOrStdout())
+}
+
 func apiRun(cmd *cobra.Command, flags apiFlags, command string, run func(context.Context, *dsapi.Client) (*dsapi.Response, error)) error {
 	client, profile, err := apiClient(flags)
 	if err != nil {
+		writeAPIError(cmd, command, "CONFIG_ERROR", err)
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
 	defer cancel()
 	resp, err := run(ctx, client)
 	if err != nil {
-		e := output.NewEnvelope(command).WithError(output.EnvelopeError{Code: "DS_API_ERROR", Message: err.Error()})
-		_ = e.Write(cmd.OutOrStdout())
+		writeAPIError(cmd, command, "DS_API_ERROR", err)
 		return err
 	}
 	return writeAPIResponse(cmd, command, profile, resp)

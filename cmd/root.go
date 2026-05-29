@@ -7,8 +7,8 @@ var Version = "0.1.0-dev"
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ds-cli",
-		Short:         "ds-cli deploys Apache DolphinScheduler clusters.",
-		Long:          "ds-cli is a single-binary CLI that installs Java, ZooKeeper, and Apache DolphinScheduler 3.4.1, configures MySQL metadata storage, and manages pseudo-cluster or distributed cluster lifecycle.",
+		Short:         "AI-first Apache DolphinScheduler CLI for Codex and Claude Code.",
+		Long:          "ds-cli is a non-interactive, single-binary CLI for AI agents such as Codex and Claude Code. It deploys Apache DolphinScheduler 3.4.1, manages pseudo-cluster or distributed lifecycle, and exposes REST API helpers for projects, workflows, tasks, schedules, alerts, and environments. Commands are designed for machine parsing: stdout is a JSON envelope and stderr is reserved for progress.",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,

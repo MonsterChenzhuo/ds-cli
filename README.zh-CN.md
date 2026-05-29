@@ -1,6 +1,8 @@
 # ds-cli
 
-`ds-cli` 是面向 Claude Code 使用的单二进制 Go CLI，用于部署 Apache DolphinScheduler 3.4.1。它支持本机伪集群和多机分布式两种模式，会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包和 MySQL JDBC Driver，渲染 MySQL 元数据库配置，并执行数据库初始化与启停管理。
+`ds-cli` 是面向 Codex 和 Claude Code 的 AI-first 单二进制 Go CLI，用于部署和操作 Apache DolphinScheduler 3.4.1。它不是给人手工交互使用的 CLI：所有输入都通过 YAML、flag、环境变量或文件传入；所有运维命令在 stdout 输出统一 JSON envelope，stderr 只放进度和诊断信息，方便 agent 稳定解析。
+
+它支持本机伪集群和多机分布式两种模式，会安装或复用 JDK 11、按需安装 ZooKeeper、下载 DolphinScheduler 二进制包和 MySQL JDBC Driver，渲染 MySQL 元数据库配置，并执行数据库初始化与启停管理。部署后还提供 DolphinScheduler REST API 封装，方便 agent 创建项目、任务、调度、告警和环境。
 
 ## 范围
 
@@ -12,6 +14,7 @@
 - Java：如果 `cluster.java_home` 不存在，会优先复用系统 JDK 11，否则尝试通过 `apt-get`、`dnf`、`yum` 或 `brew` 安装 OpenJDK 11。
 - 环境变量：支持通过 `env` 配置块写入 `dolphinscheduler_env.sh`，例如 `PYTHON_LAUNCHER`、`HADOOP_USER_NAME`、运行时 `JAVA_HOME`、`HADOOP_HOME` 和 `PATH` 前缀。
 - API 管理：支持像 `spark-cli` 一样配置命名 DS API 集群，并通过 REST API 创建项目、创建单任务工作流、上线/下线/删除任务、配置调度、告警组和 DS 环境。
+- Agent 契约：命令不做交互式提问，不输出给人看的 stdout 文案；调用方应只解析 JSON envelope，并在失败时读取 `error`、`steps[].message` 和 `~/.ds-cli/runs/<run-id>/`。
 
 ## 安装
 
@@ -21,7 +24,7 @@
 curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | bash
 ```
 
-脚本会自动识别 `linux/darwin` 和 `amd64/arm64`，下载 GitHub Release 中对应的 `ds-cli` 压缩包，校验 checksum，安装二进制，并把内置 Claude Code skill 安装到 `~/.claude/skills/`，这样 Claude Code 能自动发现。
+脚本会自动识别 `linux/darwin` 和 `amd64/arm64`，下载 GitHub Release 中对应的 `ds-cli` 压缩包，校验 checksum，安装二进制，并默认把内置 skill 同时安装到 `~/.Codex/skills/` 和 `~/.claude/skills/`，这样 Codex 与 Claude Code 都能自动发现。
 
 常用覆盖参数：
 
@@ -32,9 +35,17 @@ curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts
 # 安装到用户目录，不使用 sudo
 curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | PREFIX=$HOME/.local/bin NO_SUDO=1 bash
 
+# 只安装 skill 到一个目录
+curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | SKILL_DIR=$HOME/.Codex/skills bash
+
+# 跳过 skill 安装
+curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | NO_SKILL=1 bash
+
 # 私有 fork 或仓库名变化时
 curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | REPO=your-org/ds-cli bash
 ```
+
+支持的环境变量：`VERSION`、`PREFIX`、`SKILL_DIR`、`SKILL_DIRS`、`NO_SKILL`、`NO_SUDO`、`REPO`。`SKILL_DIRS` 是冒号分隔的多目录列表，默认值等价于 `~/.Codex/skills:~/.claude/skills`。
 
 ### 从源码构建
 
@@ -52,7 +63,7 @@ bin/ds-cli --help
 
 GoReleaser 会把 `README`、`LICENSE`、`ds.yaml.example`、`ds.distributed.yaml.example` 和 `skills/**/*` 一起放入 tar.gz 包，供一键安装脚本安装。
 
-安装后重启 Claude Code，输入 `/ds` 或 `/dolphinscheduler-pseudo-cluster` 应能看到对应 skill。
+安装后重启 Codex 或 Claude Code，输入 `/ds` 或 `/dolphinscheduler-pseudo-cluster` 应能看到对应 skill。
 
 ## 配置
 
@@ -182,6 +193,53 @@ dolphinscheduler-task-python
 bash ./bin/install-plugins.sh 3.4.1
 ```
 
+## 给 AI agent
+
+`ds-cli` 的主要调用方是 Codex 和 Claude Code，命令设计优先考虑 agent 稳定调用，而不是人类终端体验：
+
+- 不要期待交互式 prompt。所有输入必须提前写入 `ds.yaml`、命令 flag、环境变量或脚本文件。
+- stdout 是结果契约，只解析 JSON envelope；stderr 只用于进度、错误提示和排障线索。
+- 部署类命令先看 `ok`，失败时看 `error`、`steps[].ok`、`steps[].message`，再按 `run_id` 打开 `~/.ds-cli/runs/<run-id>/`。
+- API 类命令先配置命名集群 profile，再执行 `project`、`task`、`schedule`、`alert`、`environment`。
+- agent 生成单脚本任务时优先使用 `task create`，需要精细管理工作流定义时再使用 `workflow` 命令。
+
+部署命令 envelope 示例：
+
+```json
+{
+  "command": "bootstrap",
+  "ok": true,
+  "steps": [
+    {
+      "name": "preflight",
+      "ok": true,
+      "elapsed_ms": 42
+    }
+  ],
+  "run_id": "20260530120000-bootstrap",
+  "config_path": "/path/to/ds.yaml"
+}
+```
+
+API 命令 envelope 示例：
+
+```json
+{
+  "command": "project.list",
+  "ok": true,
+  "summary": {
+    "cluster": "local",
+    "api_url": "http://localhost:12345/dolphinscheduler",
+    "http_status": 200
+  },
+  "data": {
+    "code": 0,
+    "msg": "success",
+    "data": []
+  }
+}
+```
+
 ## 登录
 
 默认访问：
@@ -276,7 +334,7 @@ ds-cli environment create python3 \
   --worker-groups default
 ```
 
-所有新增 API 命令 stdout 仍输出 JSON envelope；stderr 不输出自由文本，便于 Codex 或脚本直接解析。
+所有新增 API 命令 stdout 仍输出 JSON envelope；stderr 不承载结果数据，便于 Codex、Claude Code 或脚本直接解析。
 
 ## 运维
 
