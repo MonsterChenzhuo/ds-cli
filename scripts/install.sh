@@ -116,20 +116,6 @@ if [ "${NO_SKILL:-0}" != "1" ] && [ -d "${tmpdir}/skills" ]; then
   done
 fi
 
-if [ -f "${tmpdir}/ds.yaml.example" ]; then
-  mkdir -p "$HOME/.ds-cli"
-  if [ ! -f "$HOME/.ds-cli/ds.yaml.example" ]; then
-    cp "${tmpdir}/ds.yaml.example" "$HOME/.ds-cli/ds.yaml.example"
-  fi
-fi
-
-if [ -f "${tmpdir}/ds.distributed.yaml.example" ]; then
-  mkdir -p "$HOME/.ds-cli"
-  if [ ! -f "$HOME/.ds-cli/ds.distributed.yaml.example" ]; then
-    cp "${tmpdir}/ds.distributed.yaml.example" "$HOME/.ds-cli/ds.distributed.yaml.example"
-  fi
-fi
-
 installed_version=$("${PREFIX}/ds-cli" --version 2>/dev/null || echo "$VERSION")
 info "done: ${installed_version}"
 info "run: ds-cli --help"

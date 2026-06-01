@@ -1,79 +1,78 @@
 ---
 name: ds
-description: 使用 ds-cli 为 Codex/Claude Code 部署和操作 Apache DolphinScheduler 3.4.1，支持本机伪集群、多机分布式和 DS REST API 项目/任务/调度/告警/环境管理；这是 dolphinscheduler-pseudo-cluster skill 的短命令别名。
+description: 使用 ds-cli 通过 DolphinScheduler REST API 管理已有 DS 集群的项目、单任务工作流、普通工作流、调度、告警组和环境；这是 DolphinScheduler API skill 的短命令别名。
 ---
 
-# ds-cli 快捷 Skill
+# ds-cli API 快捷 Skill
 
-这是 `dolphinscheduler-pseudo-cluster` 的短别名。使用本 skill 时，按以下流程驱动 `ds-cli` 部署和操作 DolphinScheduler 3.4.1。`ds-cli` 是给 Codex/Claude Code 调用的非交互式工具：不要等待 prompt，提前准备 YAML、flag、环境变量或脚本文件；stdout 只解析 JSON envelope，stderr 只作为进度和排障信息。
+本 skill 使用 `ds-cli` 操作已经运行的 Apache DolphinScheduler API server。`ds-cli` 是非交互式工具：提前准备 profile、flag、环境变量或脚本文件；stdout 只解析 JSON envelope，stderr 只作为诊断信息。
 
-默认伪集群；用户要求完整分布式时生成分布式 `ds.yaml`。
+`ds-cli` 不负责安装、配置、启动、停止或升级 DolphinScheduler。
 
 ## 工作流
 
-1. 确认用户提供 MySQL 连接信息：host、port、database、username、password。
-2. 如果用户希望 CLI 创建数据库，还需要 MySQL 管理员账号，并在配置中设置 `mysql.create_database: true`。
-3. 写入 `ds.yaml`，可从 `ds.yaml.example` 复制。
-   - 默认 task 插件为 `shell` 和 `python`，如需显式配置：`plugins.task: [shell, python]`。
-   - `ds-cli` 会写入 `conf/plugins_config` 并执行官方 `bash ./bin/install-plugins.sh 3.4.1` 安装插件。
-   - 如需 Python/Hadoop/Java 运行时环境，使用 `env.python_launcher`、`env.hadoop_user_name`、`env.java_home`、`env.hadoop_home`、`env.path_prepend` 或 `env.exports`。
-4. 按顺序执行：
+1. 确认用户已有可访问的 DolphinScheduler API 地址，例如 `http://host:12345/dolphinscheduler`。
+2. 确认认证方式：优先使用 token，其次 sessionId，再其次用户名密码。
+3. 保存命名 API profile，或临时设置环境变量。
+4. 根据目标选择命令：
+   - 项目：`project create/list/get/delete`
+   - 单脚本任务：`task create/online/offline/delete/get/list`
+   - 普通工作流：`workflow create/update/get/list/online/offline/delete`
+   - 调度：`schedule create/update/get/list/online/offline/delete`
+   - 告警组：`alert group create/update/list/delete`
+   - 环境：`environment create/update/list/get/delete`
+
+## 配置
 
 ```bash
-ds-cli preflight
-ds-cli install
-ds-cli configure
-ds-cli init-db
-ds-cli plugins --restart
-ds-cli start
-ds-cli status
+ds-cli config cluster add prod \
+  --api-url http://ds.example.com/dolphinscheduler \
+  --user admin \
+  --password dolphinscheduler123 \
+  --activate
+
+ds-cli config cluster list
+ds-cli config cluster activate prod
 ```
 
-或者首次部署直接执行：
+也可逐次覆盖：
 
 ```bash
-ds-cli bootstrap
+export DSCLI_API_URL=http://localhost:12345/dolphinscheduler
+export DSCLI_TOKEN=<access-token>
+ds-cli project list
 ```
 
-## 结果判断
+优先级：`--cluster` -> `DSCLI_CLUSTER` -> `active_cluster`；认证优先级为 token、sessionId、用户名密码。
 
-每条命令 stdout 会输出 JSON envelope，agent 应只解析 stdout：
-
-- `ok: true` 表示命令成功。
-- `steps[].ok: false` 表示某个步骤失败。
-- 失败时读取 `~/.ds-cli/runs/<run-id>/<step>.stderr`。
-- `status` 会逐服务核对进程，worker 缺失时必须视为失败。
-- 需要按组件重启时，使用 `ds-cli restart worker`、`ds-cli restart api worker`、`ds-cli restart zookeeper` 或 `ds-cli restart all`。
-- API 命令失败时读取 envelope 的 `error` 和 DolphinScheduler 原始 `data`；不要把 stderr 当成结果数据。
-
-## 默认登录
-
-访问：
-
-```text
-http://localhost:12345/dolphinscheduler/ui
-```
-
-账号：
-
-```text
-admin / dolphinscheduler123
-```
-
-## API 管理
-
-部署完成后可配置命名 API 集群并操作项目、任务、调度、告警和环境：
+## 常用命令
 
 ```bash
-ds-cli config cluster add local --api-url http://localhost:12345/dolphinscheduler --user admin --password dolphinscheduler123 --activate
-ds-cli project create demo
-ds-cli task create extract --project-code <project-code> --workflow-name daily_extract --script-file ./extract.sh
+ds-cli project create demo --description "created by ds-cli"
+ds-cli project list
+
+ds-cli task create extract \
+  --project-code <project-code> \
+  --workflow-name daily_extract \
+  --type SHELL \
+  --script-file ./extract.sh
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
 ds-cli task delete <workflow-code>
-ds-cli schedule create --workflow-code <workflow-code> --crontab "0 0 2 * * ? *" --start-time "2026-01-01 00:00:00" --end-time "2099-01-01 00:00:00"
+
+ds-cli schedule create \
+  --workflow-code <workflow-code> \
+  --crontab "0 0 2 * * ? *" \
+  --start-time "2026-01-01 00:00:00" \
+  --end-time "2099-01-01 00:00:00"
+
 ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/python3"
 ```
 
-也可用 `DSCLI_API_URL`、`DSCLI_TOKEN`、`DSCLI_SESSION_ID`、`DSCLI_USER`、`DSCLI_PASSWORD` 临时覆盖 profile。新增 API 命令 stdout 输出 JSON envelope。
+## 结果判断
+
+- `ok: true` 表示命令成功。
+- `ok: false` 时读取 `error.code`、`error.message` 和 `data`。
+- API 命令的 `summary` 包含 `cluster`、`api_url`、`http_status`。
+- 不要把 stderr 当成结果数据。

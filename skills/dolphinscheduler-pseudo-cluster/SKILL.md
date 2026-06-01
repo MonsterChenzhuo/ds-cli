@@ -1,98 +1,89 @@
 ---
 name: dolphinscheduler-pseudo-cluster
-description: 使用 ds-cli 为 Codex/Claude Code 部署和操作 Apache DolphinScheduler 3.4.1，支持本机伪集群、多机分布式和 DS REST API 项目/任务/调度/告警/环境管理；适用于“部署 dolphinscheduler”“安装 DS 3.4.1”“初始化 DolphinScheduler MySQL 元数据库”“创建 DS 任务”等请求。
+description: 使用 ds-cli 通过 DolphinScheduler REST API 管理已有 DS 集群的项目、单任务工作流、普通工作流、调度、告警组和环境；保留此 skill 名称用于兼容旧安装路径。
 ---
 
-# DolphinScheduler 3.4.1 部署
+# DolphinScheduler API 操作
 
-本 skill 使用 `ds-cli` 部署和操作 DolphinScheduler 3.4.1。`ds-cli` 是给 Codex/Claude Code 调用的非交互式工具：不要等待 prompt，提前准备 YAML、flag、环境变量或脚本文件；stdout 只解析 JSON envelope，stderr 只作为进度和排障信息。
+本 skill 使用 `ds-cli` 操作已经运行的 Apache DolphinScheduler API server。当前 `ds-cli` 是纯 REST API 客户端，不再提供 DolphinScheduler 安装、伪集群、分布式部署、ZooKeeper、MySQL 初始化、插件安装或 systemd 管理能力。
 
-默认本机伪集群；用户要求“完整分布式/多机/集群部署”时，生成包含 `hosts`、`ssh`、`roles` 的 `ds.yaml`。
+## 前置条件
 
-## 工作流
+- 用户已经有可访问的 DolphinScheduler API 地址，例如 `http://host:12345/dolphinscheduler`。
+- 用户提供 token、sessionId，或用户名密码。
+- 如果要创建任务，目标 DolphinScheduler 集群本身需要已经具备对应 worker group、tenant、environment 和 task plugin。
 
-1. 确认用户提供 MySQL 连接信息：host、port、database、username、password。
-2. 如果用户希望 CLI 创建数据库，还需要 MySQL 管理员账号，并在配置中设置 `mysql.create_database: true`。
-3. 写入 `ds.yaml`，可从 `ds.yaml.example` 复制。
-   - 伪集群：使用 `cluster.mode: pseudo`。
-   - 分布式：使用 `cluster.mode: distributed`，填写 `hosts`、`ssh`、`roles`。
-   - 复用外部 ZooKeeper：填写 `zookeeper.external_connect_string`，不要要求 `roles.zookeeper`。
-   - 由 ds-cli 安装 ZooKeeper：填写奇数个 `roles.zookeeper`。
-   - 默认 task 插件为 `shell` 和 `python`，如需显式配置：`plugins.task: [shell, python]`。
-   - `ds-cli` 会写入 `conf/plugins_config` 并执行官方 `bash ./bin/install-plugins.sh 3.4.1` 安装插件。
-   - 如需 Python/Hadoop/Java 运行时环境，使用 `env.python_launcher`、`env.hadoop_user_name`、`env.java_home`、`env.hadoop_home`、`env.path_prepend` 或 `env.exports`。
-4. 按顺序执行：
+## 配置命名 API 集群
 
 ```bash
-ds-cli preflight
-ds-cli install
-ds-cli configure
-ds-cli init-db
-ds-cli plugins --restart
-ds-cli start
-ds-cli status
-```
-
-或者首次部署直接执行：
-
-```bash
-ds-cli bootstrap
-```
-
-## 结果判断
-
-每条命令 stdout 会输出 JSON envelope，agent 应只解析 stdout：
-
-- `ok: true` 表示命令成功。
-- `steps[].ok: false` 表示某个步骤失败。
-- 失败时读取 `~/.ds-cli/runs/<run-id>/<step>.stderr`。
-- `status` 会逐服务核对进程，worker 缺失时必须视为失败。
-- 需要按组件重启时，使用 `ds-cli restart worker`、`ds-cli restart api worker`、`ds-cli restart zookeeper` 或 `ds-cli restart all`；分布式模式会根据 `roles` 自动定位主机。
-- API 命令失败时读取 envelope 的 `error` 和 DolphinScheduler 原始 `data`；不要把 stderr 当成结果数据。
-
-## 默认登录
-
-访问：
-
-```text
-http://localhost:12345/dolphinscheduler/ui
-```
-
-账号：
-
-```text
-admin / dolphinscheduler123
-```
-
-## API 管理
-
-部署完成后可配置命名 API 集群，后续命令会通过 DolphinScheduler REST API 操作项目、任务、调度、告警和环境：
-
-```bash
-ds-cli config cluster add local \
-  --api-url http://localhost:12345/dolphinscheduler \
+ds-cli config cluster add prod \
+  --api-url http://ds.example.com/dolphinscheduler \
   --user admin \
   --password dolphinscheduler123 \
   --activate
+
+ds-cli config cluster list
+ds-cli config cluster activate prod
 ```
 
-常用命令：
+临时调用也可以使用：
+
+```bash
+export DSCLI_API_URL=http://localhost:12345/dolphinscheduler
+export DSCLI_TOKEN=<access-token>
+ds-cli project list
+```
+
+解析优先级：
+
+- 集群：`--cluster` -> `DSCLI_CLUSTER` -> `active_cluster`
+- API 地址：`--api-url` -> `DSCLI_API_URL` -> profile `api_url`
+- 认证：token -> sessionId -> username/password
+- 超时：`--api-timeout` -> `DSCLI_API_TIMEOUT` -> profile `timeout` -> `30s`
+
+## 标准操作流程
+
+1. 先执行 `ds-cli project list` 确认可连通。
+2. 需要创建项目时执行 `ds-cli project create <name>`。
+3. agent 生成单脚本任务时，优先执行 `ds-cli task create`，再根据需要 `task online`。
+4. 已有复杂工作流时，使用 `workflow` 命令直接管理工作流定义。
+5. 需要定时运行时，使用 `schedule create` 后 `schedule online`。
+6. 告警组使用 `alert group`，运行环境使用 `environment`。
+
+## 常用命令
 
 ```bash
 ds-cli project create demo --description "created by ds-cli"
-ds-cli task create extract --project-code <project-code> --workflow-name daily_extract --script-file ./extract.sh
+
+ds-cli task create extract \
+  --project-code <project-code> \
+  --workflow-name daily_extract \
+  --type SHELL \
+  --script-file ./extract.sh
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
 ds-cli task delete <workflow-code>
-ds-cli schedule create --workflow-code <workflow-code> --crontab "0 0 2 * * ? *" --start-time "2026-01-01 00:00:00" --end-time "2099-01-01 00:00:00"
+
+ds-cli workflow create daily_job --project-code <project-code>
+ds-cli workflow list --project-code <project-code>
+
+ds-cli schedule create \
+  --workflow-code <workflow-code> \
+  --crontab "0 0 2 * * ? *" \
+  --start-time "2026-01-01 00:00:00" \
+  --end-time "2099-01-01 00:00:00"
+ds-cli schedule online <schedule-id> --project-code <project-code>
+
 ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/python3"
 ```
 
-也可用 `DSCLI_API_URL`、`DSCLI_TOKEN`、`DSCLI_SESSION_ID`、`DSCLI_USER`、`DSCLI_PASSWORD` 临时覆盖 profile。新增 API 命令 stdout 输出 JSON envelope。
+## 输出契约
 
-## 注意
+stdout 只解析 JSON envelope：
 
-- DolphinScheduler 3.4.1 的二进制包不包含插件依赖；`ds-cli` 会使用官方 `install-plugins.sh` 安装 `shell`、`python` task 插件，并放置 MySQL JDBC Driver 用于元数据库初始化。
-- 运行 shell、Spark、Hive、Flink 等任务所需的外部运行时不在 v1 部署范围内。
-- 分布式模式通过 SSH 执行，目标机器需要 SSH 可达，且 `ssh.user` 具备安装目录、数据目录和 Java 安装所需权限。
+- `ok: true` 表示命令成功。
+- `ok: false` 时读取 `error.code`、`error.message`。
+- `summary` 包含 `cluster`、`api_url`、`http_status`。
+- `data` 是 DolphinScheduler API 的原始响应体。
+- stderr 只作为诊断信息，不承载结果数据。

@@ -102,6 +102,44 @@ func TestAPICommandConfigErrorWritesEnvelope(t *testing.T) {
 	}
 }
 
+func TestRootDoesNotExposeDeploymentLifecycleCommands(t *testing.T) {
+	for _, name := range []string{
+		"preflight",
+		"install",
+		"configure",
+		"init-db",
+		"plugins",
+		"start",
+		"stop",
+		"restart",
+		"status",
+		"systemd",
+		"uninstall",
+		"bootstrap",
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			out, err := executeRoot(t, name)
+			if err == nil {
+				t.Fatalf("%s returned nil error; deployment lifecycle commands must be removed", name)
+			}
+			if out != "" {
+				t.Fatalf("%s wrote stdout %q; unknown commands should not emit API envelopes", name, out)
+			}
+		})
+	}
+
+	out, err := executeRoot(t, "--help")
+	if err != nil {
+		t.Fatalf("--help returned error: %v", err)
+	}
+	for _, removed := range []string{"bootstrap", "install", "zookeeper", "systemd"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("root help still mentions removed deployment term %q:\n%s", removed, out)
+		}
+	}
+}
+
 func TestProjectCreatePostsToDolphinSchedulerAPI(t *testing.T) {
 	var sawToken string
 	var sawBody map[string]any

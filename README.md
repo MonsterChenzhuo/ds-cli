@@ -1,31 +1,22 @@
 # ds-cli
 
-An AI-first, single-binary Go CLI for Codex and Claude Code to deploy and operate Apache DolphinScheduler 3.4.1. The CLI is intentionally non-interactive: agents pass config files, flags, or environment variables, then parse one JSON envelope from stdout. Human-readable progress goes to stderr.
+A single-binary CLI for operating existing Apache DolphinScheduler clusters through the REST API. It is designed for AI agents and automation: API commands are non-interactive and emit one structured JSON envelope on stdout.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md).
 
 ## Quick Start
 
-Deploy a local pseudo-cluster:
+Save a named DolphinScheduler API profile:
 
 ```bash
-cp ds.yaml.example ds.yaml
-$EDITOR ds.yaml
-ds-cli bootstrap
-ds-cli status
-```
-
-After the API server is running, save a named DolphinScheduler API cluster profile:
-
-```bash
-ds-cli config cluster add local \
-  --api-url http://localhost:12345/dolphinscheduler \
+ds-cli config cluster add prod \
+  --api-url http://ds.example.com/dolphinscheduler \
   --user admin \
   --password dolphinscheduler123 \
   --activate
 ```
 
-Create and publish a single-task workflow for an agent-generated shell script:
+Create a project and a single-task workflow:
 
 ```bash
 ds-cli project create demo --description "created by ds-cli"
@@ -37,11 +28,13 @@ ds-cli task create extract_orders \
 ds-cli task online <workflow-code> --project-code <project-code>
 ```
 
+`ds-cli` does not install, start, stop, configure, or upgrade DolphinScheduler. Point it at an already running API server.
+
 ## Install
 
 ### One-Liner
 
-Installs the latest release binary into `/usr/local/bin` and installs bundled skills into both `~/.Codex/skills/` and `~/.claude/skills/` by default. Re-run the same command to upgrade.
+Installs the latest release binary into `/usr/local/bin` and installs bundled skills into `~/.Codex/skills/` and `~/.claude/skills/` by default. Re-run the same command to upgrade.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MonsterChenzhuo/ds-cli/main/scripts/install.sh | bash
@@ -72,99 +65,9 @@ make build
 bin/ds-cli --help
 ```
 
-## Configure Deployment
+## Configure
 
-`ds-cli` deploys either a local pseudo-cluster or a distributed cluster. Config lookup order:
-
-```text
---config <path> -> $DSCLI_CONFIG -> ./ds.yaml -> ~/.ds-cli/ds.yaml
-```
-
-Pseudo-cluster:
-
-```bash
-cp ds.yaml.example ds.yaml
-```
-
-Distributed cluster:
-
-```bash
-cp ds.distributed.yaml.example ds.yaml
-```
-
-Core distributed fields:
-
-```yaml
-cluster:
-  mode: distributed
-
-ssh:
-  user: dolphinscheduler
-  private_key: ~/.ssh/id_rsa
-  port: 22
-  parallelism: 4
-
-hosts:
-  - { name: ds1, address: 10.0.0.1 }
-  - { name: ds2, address: 10.0.0.2 }
-  - { name: ds3, address: 10.0.0.3 }
-
-roles:
-  zookeeper: [ds1, ds2, ds3]
-  api_server: [ds1]
-  master_server: [ds1, ds2]
-  worker_server: [ds2, ds3]
-  alert_server: [ds1]
-```
-
-Reuse an external ZooKeeper instead of letting `ds-cli` manage it:
-
-```yaml
-zookeeper:
-  external_connect_string: zk1:2181,zk2:2181,zk3:2181
-```
-
-Runtime environment variables are rendered into `dolphinscheduler_env.sh`:
-
-```yaml
-env:
-  python_launcher: /usr/bin/python3
-  hadoop_user_name: airflow
-  java_home: /data/hadoopclient/JDK/jdk1.8.0_272
-  hadoop_home: /data/hadoopclient/HDFS/hadoop
-  path_prepend:
-    - $HADOOP_HOME/bin
-    - $HADOOP_HOME/sbin
-  exports:
-    SPARK_HOME: /data/spark
-    HIVE_HOME: /data/hive
-```
-
-`cluster.java_home` controls the JDK used or installed by `ds-cli`; `env.java_home` controls DolphinScheduler service runtime `JAVA_HOME`.
-
-## Deployment Commands
-
-```bash
-ds-cli preflight
-ds-cli install
-ds-cli configure
-ds-cli init-db
-ds-cli plugins --restart
-ds-cli start
-ds-cli status
-```
-
-Or run the full lifecycle:
-
-```bash
-ds-cli bootstrap
-```
-
-`install` and `bootstrap` install default task plugins through DolphinScheduler's official flow: render `conf/plugins_config`, run `bash ./bin/install-plugins.sh 3.4.1`, and verify the configured jars under `plugins/task-plugins/`.
-
-## API Cluster Profiles
-
-REST API credentials are stored separately from deployment config at `~/.config/ds-cli/config.yaml`.
+API credentials are stored in `~/.config/ds-cli/config.yaml` by default. Use `DSCLI_CONFIG_DIR` to choose another config directory.
 
 ```bash
 ds-cli config cluster add prod \
@@ -172,9 +75,20 @@ ds-cli config cluster add prod \
   --user admin \
   --password dolphinscheduler123 \
   --activate
-
 ds-cli config cluster list
 ds-cli config cluster activate prod
+```
+
+The file shape is:
+
+```yaml
+active_cluster: prod
+clusters:
+  prod:
+    api_url: http://ds.example.com/dolphinscheduler
+    username: admin
+    password: dolphinscheduler123
+    timeout: 30s
 ```
 
 Per-invocation overrides:
@@ -185,21 +99,67 @@ export DSCLI_TOKEN=<access-token>
 ds-cli project list
 ```
 
-Authentication precedence: `--token` / `DSCLI_TOKEN`, then `--session-id` / `DSCLI_SESSION_ID`, then `--user --password` / `DSCLI_USER DSCLI_PASSWORD`. Password login calls `/login` first and then reuses the returned `sessionId`.
+Resolution order:
 
-## API Commands
+| Setting | Precedence |
+|---|---|
+| Cluster | `--cluster` -> `DSCLI_CLUSTER` -> `active_cluster` |
+| API URL | `--api-url` -> `DSCLI_API_URL` -> profile `api_url` |
+| Auth | `--token` / `DSCLI_TOKEN`, then `--session-id` / `DSCLI_SESSION_ID`, then username/password |
+| Timeout | `--api-timeout` -> `DSCLI_API_TIMEOUT` -> profile `timeout` -> `30s` |
+
+Password login calls `/login` first and then reuses the returned `sessionId`.
+
+## Commands
 
 | Command | Purpose |
 |---|---|
-| `ds-cli config cluster add/list/activate` | Manage named DS API cluster profiles |
-| `ds-cli project create/list/get/delete` | Manage DolphinScheduler projects |
+| `ds-cli config cluster add/list/activate` | Manage named DolphinScheduler API profiles |
+| `ds-cli project create/list/get/delete` | Manage projects |
 | `ds-cli workflow create/update/get/list/online/offline/delete` | Manage workflow definitions |
-| `ds-cli task create/online/offline/delete/get/list` | Agent-friendly single-task workflow helpers |
+| `ds-cli task create/online/offline/delete/get/list` | Create and operate single-task workflows |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | Manage workflow schedules |
 | `ds-cli alert group create/update/list/delete` | Manage alert groups |
-| `ds-cli environment create/update/list/get/delete` | Manage DolphinScheduler environments |
+| `ds-cli environment create/update/list/get/delete` | Manage task runtime environments |
+| `ds-cli --version` | Print the CLI version |
 
-Schedule and alert example:
+Common API flags are available on API command groups: `--cluster`, `--api-url`, `--user`, `--password`, `--token`, `--session-id`, and `--api-timeout`.
+
+### Projects
+
+```bash
+ds-cli project create demo --description "created by ds-cli"
+ds-cli project list --page-no 1 --page-size 20
+ds-cli project get <project-code>
+ds-cli project delete <project-code>
+```
+
+### Single-Task Workflows
+
+`task create` creates an offline workflow definition containing one `SHELL` or `PYTHON` task node. It is the agent-friendly path for script jobs.
+
+```bash
+ds-cli task create extract_orders \
+  --project-code <project-code> \
+  --workflow-name daily_extract_orders \
+  --type SHELL \
+  --script-file ./extract_orders.sh \
+  --worker-group default
+
+ds-cli task online <workflow-code> --project-code <project-code>
+ds-cli task offline <workflow-code> --project-code <project-code>
+ds-cli task delete <workflow-code>
+```
+
+Use `workflow` when the caller needs direct workflow-definition operations:
+
+```bash
+ds-cli workflow create daily_job --project-code <project-code>
+ds-cli workflow update <workflow-code> --name daily_job_v2
+ds-cli workflow list --project-code <project-code>
+```
+
+### Schedules, Alerts, and Environments
 
 ```bash
 ds-cli schedule create \
@@ -219,44 +179,24 @@ ds-cli environment create python3 \
 
 ## For AI Agents
 
-This CLI is optimized for Codex and Claude Code, not for manual terminal workflows.
-
-- Do not expect prompts. Provide every input through YAML, flags, env vars, or files.
-- Treat stdout as the contract. It is always a JSON envelope for operational commands.
-- Treat stderr as progress and diagnostics. Do not parse stderr as result data.
-- Prefer named API cluster profiles before creating projects, tasks, schedules, alerts, or environments.
-- Prefer `task create` for single-script jobs generated by an agent; use `workflow` only when the caller needs direct workflow-definition operations.
-- On failure, inspect `ok`, `error`, `steps[].ok`, `steps[].message`, and the run log under `~/.ds-cli/runs/<run-id>/`.
+- Do not expect prompts. Provide every input through flags, environment variables, or files.
+- Treat stdout as the API result contract. API/profile commands write one JSON envelope.
+- Treat stderr as diagnostics only. Do not parse stderr as result data.
+- Prefer named cluster profiles for repeated operations.
+- Prefer `task create` for a one-script job. Use `workflow` only for direct workflow-definition management.
+- On failure, inspect `ok`, `error.code`, `error.message`, `summary`, and the DolphinScheduler response under `data`.
 
 ## Output Contract
 
-Deployment command envelope:
-
-```json
-{
-  "command": "bootstrap",
-  "ok": true,
-  "steps": [
-    {
-      "name": "preflight",
-      "ok": true,
-      "elapsed_ms": 42
-    }
-  ],
-  "run_id": "20260530120000-bootstrap",
-  "config_path": "/path/to/ds.yaml"
-}
-```
-
-API command envelope:
+Successful API command:
 
 ```json
 {
   "command": "project.list",
   "ok": true,
   "summary": {
-    "cluster": "local",
-    "api_url": "http://localhost:12345/dolphinscheduler",
+    "cluster": "prod",
+    "api_url": "http://ds.example.com/dolphinscheduler",
     "http_status": 200
   },
   "data": {
@@ -267,31 +207,22 @@ API command envelope:
 }
 ```
 
-Failures keep the same envelope shape with `ok: false` plus either `error` or failed `steps[]`.
+Configuration or API failure after command dispatch:
 
-## Operations
-
-```bash
-ds-cli stop
-ds-cli start
-ds-cli restart worker
-ds-cli restart api worker
-ds-cli restart zookeeper
-ds-cli restart all
-ds-cli status
-ds-cli plugins --restart
-ds-cli systemd
-ds-cli uninstall
-ds-cli uninstall --purge-data
+```json
+{
+  "command": "project.list",
+  "ok": false,
+  "error": {
+    "code": "CONFIG_ERROR",
+    "message": "api_url is required: configure ds-cli config cluster add <name> --api-url, set DSCLI_API_URL, or pass --api-url"
+  }
+}
 ```
-
-`restart` supports `api`/`api-server`, `master`/`master-server`, `worker`/`worker-server`, `alert`/`alert-server`, `zk`/`zookeeper`, and `all`. Distributed mode targets hosts by `roles`. If `zookeeper.external_connect_string` is set, `ds-cli restart zookeeper` fails instead of touching an external cluster.
-
-`systemd` installs service units with `Restart=on-failure`.
 
 ## Release
 
-GitHub Actions run vet, gofmt, race tests, build, help smoke checks, and skill front matter checks. GoReleaser packages `linux/darwin` x `amd64/arm64` archives containing the binary, `README.md`, `README.zh-CN.md`, examples, and bundled skills.
+GitHub Actions run `go vet`, `gofmt`, race tests, build, `--help`, installer syntax checks, and skill front matter checks. GoReleaser packages `linux/darwin` x `amd64/arm64` archives containing the binary, README files, LICENSE, and bundled skills.
 
 ## License
 
