@@ -50,7 +50,7 @@ func bindScheduleFlags(c *cobra.Command, f *scheduleFields, includeWorkflow bool
 	c.Flags().StringVar(&f.Crontab, "crontab", "", "Quartz cron expression")
 	c.Flags().StringVar(&f.StartTime, "start-time", "", "Schedule start time, e.g. 2026-01-01 00:00:00")
 	c.Flags().StringVar(&f.EndTime, "end-time", "", "Schedule end time, e.g. 2099-01-01 00:00:00")
-	c.Flags().StringVar(&f.Timezone, "timezone", "Asia/Shanghai", "Timezone ID")
+	c.Flags().StringVar(&f.Timezone, "timezone", "UTC", "Timezone ID")
 	c.Flags().StringVar(&f.ReleaseState, "release-state", "OFFLINE", "Release state: ONLINE or OFFLINE")
 	c.Flags().StringVar(&f.Failure, "failure-strategy", "CONTINUE", "Failure strategy: CONTINUE or END")
 	c.Flags().StringVar(&f.WarningType, "warning-type", "NONE", "Warning type: NONE, SUCCESS, FAILURE, ALL")
@@ -67,6 +67,9 @@ func (f scheduleFields) body() (map[string]any, error) {
 	}
 	if f.Crontab == "" || f.StartTime == "" || f.EndTime == "" {
 		return nil, fmt.Errorf("--crontab, --start-time, and --end-time are required")
+	}
+	if f.EnvCode == 0 {
+		return nil, fmt.Errorf("--environment-code is required (run `ds-cli environment list` to find an existing code)")
 	}
 	return map[string]any{
 		"workflowDefinitionCode":   f.WorkflowCode,

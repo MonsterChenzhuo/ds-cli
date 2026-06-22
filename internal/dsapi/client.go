@@ -74,6 +74,47 @@ func (c *Client) Form(ctx context.Context, method, path string, values url.Value
 	return c.do(ctx, method, path, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
 }
 
+// RawGet performs a GET request without DolphinScheduler {code,msg} envelope validation. It is intended
+// for endpoints that return raw payloads (e.g. /log/download-log attachments). The HTTP status is still
+// checked, but the response body is returned verbatim regardless of content-type.
+func (c *Client) RawGet(ctx context.Context, path string, values url.Values) (*Response, error) {
+	if err := c.ensureAuth(ctx); err != nil {
+		return nil, err
+	}
+	if values != nil {
+		if encoded := values.Encode(); encoded != "" {
+			if strings.Contains(path, "?") {
+				path += "&" + encoded
+			} else {
+				path += "?" + encoded
+			}
+		}
+	}
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	if c.profile.Token != "" {
+		req.Header.Set("token", c.profile.Token)
+	} else if c.profile.SessionID != "" {
+		req.Header.Set("sessionId", c.profile.SessionID)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	out := &Response{HTTPStatus: resp.StatusCode, Body: json.RawMessage(b)}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, fmt.Errorf("dolphinscheduler api returned HTTP %d: %s", resp.StatusCode, trimBody(b))
+	}
+	return out, nil
+}
+
 func (c *Client) ensureAuth(ctx context.Context) error {
 	if c.profile.Token != "" || c.profile.SessionID != "" {
 		return nil

@@ -70,12 +70,16 @@ bin/ds-cli --help
 API 凭据默认写入 `~/.config/ds-cli/config.yaml`。如需更换配置目录，设置 `DSCLI_CONFIG_DIR`。
 
 ```bash
+ds-cli config init
 ds-cli config cluster add prod \
-  --api-url http://ds.example.com/dolphinscheduler \
-  --user admin \
-  --password dolphinscheduler123 \
+  --api-url https://dolphinscheduler.example.com/dolphinscheduler \
+  --token '<access-token>' \
   --activate
+ds-cli config cluster add staging \
+  --api-url https://staging-ds.example.com/dolphinscheduler \
+  --token '<access-token>'
 ds-cli config cluster list
+ds-cli config show
 ds-cli config cluster activate prod
 ```
 
@@ -85,11 +89,16 @@ ds-cli config cluster activate prod
 active_cluster: prod
 clusters:
   prod:
-    api_url: http://ds.example.com/dolphinscheduler
-    username: admin
-    password: dolphinscheduler123
+    api_url: https://dolphinscheduler.example.com/dolphinscheduler
+    token: <access-token>
+    timeout: 30s
+  staging:
+    api_url: https://staging-ds.example.com/dolphinscheduler
+    token: <access-token>
     timeout: 30s
 ```
+
+`ds-cli config show` 会输出当前生效的 profile、字段来源和认证方式，但只显示 `has_token`、`has_session` 等布尔字段，不输出 token、sessionId 或密码明文。配置文件权限写为 `0600`。
 
 也可以逐次用环境变量覆盖：
 
@@ -114,9 +123,15 @@ ds-cli project list
 
 | 命令 | 用途 |
 |---|---|
-| `ds-cli config cluster add/list/activate` | 管理本地命名 DS API profile |
+| `ds-cli config init/show` | 初始化配置模板、查看当前生效配置 |
+| `ds-cli config cluster add/list/activate/show` | 管理本地命名 DS API profile（`show --reveal-token` / `--shell` 便于脚本集成） |
 | `ds-cli project create/list/get/delete` | 管理项目 |
-| `ds-cli workflow create/update/get/list/online/offline/delete` | 管理工作流定义 |
+| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | 管理工作流定义；`get-detail` 一次返回工作流 + 全部 task + 关系 |
+| `ds-cli workflow patch-task` | 替换多任务工作流中某个 task 的 `rawScript`（自动 offline → 更新 → 恢复 release 状态） |
+| `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流 |
+| `ds-cli workflow-instance list/get/tasks/control/delete` | 查询和控制工作流实例（`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`） |
+| `ds-cli task-instance list/log/log-download/force-success/stop` | 查询任务实例并拉取 worker 日志 |
+| `ds-cli task-def get/update` | 按 code 单独读取或更新一个任务定义（使用 `with-upstream` 接口） |
 | `ds-cli task create/online/offline/delete/get/list` | 创建和操作单任务工作流 |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | 管理工作流调度 |
 | `ds-cli alert group create/update/list/delete` | 管理告警组 |
@@ -157,6 +172,41 @@ ds-cli task delete <workflow-code>
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow update <workflow-code> --name daily_job_v2
 ds-cli workflow list --project-code <project-code>
+
+# 读取一个工作流及其所有 task 定义和上下游关系：
+ds-cli workflow get-detail <workflow-code> --project-code <project-code>
+
+# 原地替换某个 task 的 rawScript（自动 offline / 更新 / 恢复 release 状态）：
+ds-cli workflow patch-task <workflow-code> \
+  --project-code <project-code> \
+  --task-code <task-code> \
+  --raw-script-file ./new_check_partition.sh
+
+# 立即触发一次工作流：
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --environment-code <env-code>
+```
+
+### 工作流实例与任务实例
+
+```bash
+ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
+ds-cli workflow-instance get <instance-id> --project-code <project-code>
+ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+
+ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
+ds-cli task-instance log-download <task-instance-id> --output ./ti.log
+ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
+```
+
+### 按 code 单独管理 task
+
+```bash
+ds-cli task-def get <task-code> --project-code <project-code>
+ds-cli task-def update <task-code> --project-code <project-code> --raw-script-file ./new.sh
 ```
 
 ### 调度、告警和环境
@@ -167,7 +217,8 @@ ds-cli schedule create \
   --crontab "0 0 2 * * ? *" \
   --start-time "2026-01-01 00:00:00" \
   --end-time "2099-01-01 00:00:00" \
-  --timezone Asia/Shanghai \
+  --timezone UTC \
+  --environment-code <env-code> \
   --warning-type FAILURE \
   --warning-group-id <alert-group-id>
 

@@ -70,12 +70,16 @@ bin/ds-cli --help
 API credentials are stored in `~/.config/ds-cli/config.yaml` by default. Use `DSCLI_CONFIG_DIR` to choose another config directory.
 
 ```bash
+ds-cli config init
 ds-cli config cluster add prod \
-  --api-url http://ds.example.com/dolphinscheduler \
-  --user admin \
-  --password dolphinscheduler123 \
+  --api-url https://dolphinscheduler.example.com/dolphinscheduler \
+  --token '<access-token>' \
   --activate
+ds-cli config cluster add staging \
+  --api-url https://staging-ds.example.com/dolphinscheduler \
+  --token '<access-token>'
 ds-cli config cluster list
+ds-cli config show
 ds-cli config cluster activate prod
 ```
 
@@ -85,11 +89,16 @@ The file shape is:
 active_cluster: prod
 clusters:
   prod:
-    api_url: http://ds.example.com/dolphinscheduler
-    username: admin
-    password: dolphinscheduler123
+    api_url: https://dolphinscheduler.example.com/dolphinscheduler
+    token: <access-token>
+    timeout: 30s
+  staging:
+    api_url: https://staging-ds.example.com/dolphinscheduler
+    token: <access-token>
     timeout: 30s
 ```
+
+`ds-cli config show` prints the effective profile, field sources, and auth method, but only reports booleans such as `has_token` and `has_session`; it never prints token, sessionId, or password values. The config file is written with `0600` permissions.
 
 Per-invocation overrides:
 
@@ -114,9 +123,15 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 
 | Command | Purpose |
 |---|---|
-| `ds-cli config cluster add/list/activate` | Manage named DolphinScheduler API profiles |
+| `ds-cli config init/show` | Create a config template and inspect the effective profile |
+| `ds-cli config cluster add/list/activate/show` | Manage named DolphinScheduler API profiles (`show --reveal-token` or `--shell` for scripting) |
 | `ds-cli project create/list/get/delete` | Manage projects |
-| `ds-cli workflow create/update/get/list/online/offline/delete` | Manage workflow definitions |
+| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | Manage workflow definitions; `get-detail` includes tasks + relations |
+| `ds-cli workflow patch-task` | Swap one task's `rawScript` in a multi-task workflow (offline → update → restore release state) |
+| `ds-cli workflow start` | Trigger one workflow run via `/executors/start-workflow-instance` |
+| `ds-cli workflow-instance list/get/tasks/control/delete` | Inspect and control workflow instances (`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`) |
+| `ds-cli task-instance list/log/log-download/force-success/stop` | Inspect task instances and pull worker logs |
+| `ds-cli task-def get/update` | Read or update a single task definition by code (uses `with-upstream`) |
 | `ds-cli task create/online/offline/delete/get/list` | Create and operate single-task workflows |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | Manage workflow schedules |
 | `ds-cli alert group create/update/list/delete` | Manage alert groups |
@@ -157,6 +172,41 @@ Use `workflow` when the caller needs direct workflow-definition operations:
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow update <workflow-code> --name daily_job_v2
 ds-cli workflow list --project-code <project-code>
+
+# Read a workflow with all its task definitions + relations:
+ds-cli workflow get-detail <workflow-code> --project-code <project-code>
+
+# Swap one task's rawScript in-place (auto offline/online cycle):
+ds-cli workflow patch-task <workflow-code> \
+  --project-code <project-code> \
+  --task-code <task-code> \
+  --raw-script-file ./new_check_partition.sh
+
+# Trigger one run right now:
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --environment-code <env-code>
+```
+
+### Workflow and task instances
+
+```bash
+ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
+ds-cli workflow-instance get <instance-id> --project-code <project-code>
+ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+
+ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
+ds-cli task-instance log-download <task-instance-id> --output ./ti.log
+ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
+```
+
+### Task definitions by code
+
+```bash
+ds-cli task-def get <task-code> --project-code <project-code>
+ds-cli task-def update <task-code> --project-code <project-code> --raw-script-file ./new.sh
 ```
 
 ### Schedules, Alerts, and Environments
@@ -167,7 +217,8 @@ ds-cli schedule create \
   --crontab "0 0 2 * * ? *" \
   --start-time "2026-01-01 00:00:00" \
   --end-time "2099-01-01 00:00:00" \
-  --timezone Asia/Shanghai \
+  --timezone UTC \
+  --environment-code <env-code> \
   --warning-type FAILURE \
   --warning-group-id <alert-group-id>
 

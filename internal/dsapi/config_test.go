@@ -52,6 +52,9 @@ clusters:
 }
 
 func TestResolveProfileRequiresAPIURL(t *testing.T) {
+	t.Setenv("DSCLI_CONFIG_DIR", t.TempDir())
+	t.Setenv("DSCLI_API_URL", "")
+	t.Setenv("DSCLI_CLUSTER", "")
 	_, err := ResolveProfile("", APIOverrides{})
 	if err == nil {
 		t.Fatal("ResolveProfile succeeded without api_url")
