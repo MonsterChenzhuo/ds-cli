@@ -126,11 +126,11 @@ ds-cli project list
 | `ds-cli config init/show` | 初始化配置模板、查看当前生效配置 |
 | `ds-cli config cluster add/list/activate/show` | 管理本地命名 DS API profile（`show --reveal-token` / `--shell` 便于脚本集成） |
 | `ds-cli project create/list/get/delete` | 管理项目 |
-| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | 管理工作流定义；`get-detail` 一次返回工作流 + 全部 task + 关系 |
+| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | 管理工作流定义；`get-detail` 一次返回工作流 + 全部 task + 关系（`--summary` 给不含 rawScript 的精简 task 列表） |
 | `ds-cli workflow patch-task` | 替换多任务工作流中某个 task 的 `rawScript`（自动 offline → 更新 → 恢复 release 状态） |
 | `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流 |
 | `ds-cli workflow-instance list/get/tasks/control/delete` | 查询和控制工作流实例（`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`） |
-| `ds-cli task-instance list/log/log-download/force-success/stop` | 查询任务实例并拉取 worker 日志 |
+| `ds-cli task-instance list/log/log-download/force-success/stop` | 查询任务实例并拉取 worker 日志（`log --full` 取全量日志，`log-download` 直接落盘） |
 | `ds-cli task-def get/update` | 按 code 单独读取或更新一个任务定义（使用 `with-upstream` 接口） |
 | `ds-cli task create/online/offline/delete/get/list` | 创建和操作单任务工作流 |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | 管理工作流调度 |
@@ -185,6 +185,8 @@ ds-cli workflow list --project-code <project-code>
 
 # 读取一个工作流及其所有 task 定义和上下游关系：
 ds-cli workflow get-detail <workflow-code> --project-code <project-code>
+# 精简视图（task code/name/type/version，不含 rawScript）：按名字找 task code 时用这个，避免拉回几 MB
+ds-cli workflow get-detail <workflow-code> --project-code <project-code> --summary
 
 # 原地替换某个 task 的 rawScript（自动 offline / 更新 / 恢复 release 状态）：
 ds-cli workflow patch-task <workflow-code> \
@@ -207,7 +209,14 @@ ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
 
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+
+# 取一页日志（直接透传 envelope）：
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
+# 取全量日志落盘（不会静默截断），stdout 只给摘要；--clean 去掉 DS 行前缀：
+ds-cli task-instance log <task-instance-id> --full --output ./ti.log
+ds-cli task-instance log <task-instance-id> --full --clean --output ./ti.clean.log
+# 走 /log/download-log 下载整份日志；不带 --output 默认落 <临时目录>/ds-cli/<id>.log，stdout 只给摘要：
+ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
 ```

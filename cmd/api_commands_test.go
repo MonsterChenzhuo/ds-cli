@@ -726,3 +726,144 @@ func TestScheduleCreateRequiresEnvironmentCode(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestCleanDSLogStripsPrefix(t *testing.T) {
+	in := "2026-06-24 03:00:16.421 INFO  - 🐬 Initialize Task Context\r\n" +
+		"2026-06-24 03:00:47.230 INFO  -  -> --- source schema ---\r\n" +
+		"plain line without prefix"
+	got := cleanDSLog(in)
+	want := "🐬 Initialize Task Context\n--- source schema ---\nplain line without prefix"
+	if got != want {
+		t.Fatalf("cleanDSLog mismatch:\n got=%q\nwant=%q", got, want)
+	}
+}
+
+func TestTaskInstanceLogFullPagesUntilExhausted(t *testing.T) {
+	var skips []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dolphinscheduler/log/detail" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		skip := r.URL.Query().Get("skipLineNum")
+		skips = append(skips, skip)
+		// limit=2: first two pages return a full page (2 lines), third returns 1 (end).
+		switch skip {
+		case "0":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"message": "a\nb\n", "lineNum": 2}})
+		case "2":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"message": "c\nd\n", "lineNum": 2}})
+		case "4":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"message": "e\n", "lineNum": 1}})
+		default:
+			t.Fatalf("unexpected skip = %q", skip)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	outPath := filepath.Join(t.TempDir(), "full.log")
+	out, err := executeRoot(t, "task-instance", "log", "11840", "--full", "--limit", "2", "--output", outPath)
+	if err != nil {
+		t.Fatalf("task-instance log --full: %v", err)
+	}
+	if len(skips) != 3 || skips[0] != "0" || skips[1] != "2" || skips[2] != "4" {
+		t.Fatalf("paging skips = %v", skips)
+	}
+	disk, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(disk) != "a\nb\nc\nd\ne\n" {
+		t.Fatalf("full log content = %q", string(disk))
+	}
+	if !strings.Contains(out, `"lines": 5`) || !strings.Contains(out, `"command": "task-instance.log"`) {
+		t.Fatalf("unexpected stdout:\n%s", out)
+	}
+}
+
+func TestTaskInstanceLogDownloadDefaultsToTempDir(t *testing.T) {
+	payload := []byte("WHOLE LOG\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dolphinscheduler/log/download-log" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	out, err := executeRoot(t, "task-instance", "log-download", "777")
+	if err != nil {
+		t.Fatalf("task-instance log-download: %v", err)
+	}
+	want := filepath.Join(os.TempDir(), "ds-cli", "777.log")
+	disk, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("default temp file not written: %v", err)
+	}
+	if !bytes.Equal(disk, payload) {
+		t.Fatalf("file mismatch: %q", string(disk))
+	}
+	if !strings.Contains(out, "777.log") || strings.Contains(out, "WHOLE LOG") {
+		t.Fatalf("stdout should be envelope summary, not raw bytes:\n%s", out)
+	}
+	_ = os.Remove(want)
+}
+
+func TestWorkflowGetDetailSummaryOmitsRawScript(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dolphinscheduler/projects/42/workflow-definition/100" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"workflowDefinition": map[string]any{
+					"code": 100, "name": "wf", "version": 4, "releaseState": "ONLINE",
+					"globalParams": `[{"prop":"src_db","value":"x","direct":"IN","type":"VARCHAR"}]`,
+				},
+				"taskDefinitionList": []map[string]any{
+					{"code": 111, "name": "diff_alter_schema", "taskType": "SHELL", "version": 2,
+						"taskParams": map[string]any{"rawScript": "HUGE SCRIPT BODY SHOULD NOT APPEAR"}},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	out, err := executeRoot(t, "workflow", "get-detail", "100", "--project-code", "42", "--summary")
+	if err != nil {
+		t.Fatalf("workflow get-detail --summary: %v", err)
+	}
+	if strings.Contains(out, "HUGE SCRIPT BODY") || strings.Contains(out, "rawScript") {
+		t.Fatalf("summary must not contain rawScript:\n%s", out)
+	}
+	if !strings.Contains(out, "diff_alter_schema") || !strings.Contains(out, `"taskCount": 1`) {
+		t.Fatalf("summary missing task list:\n%s", out)
+	}
+	if !strings.Contains(out, "src_db") {
+		t.Fatalf("summary should decode globalParams:\n%s", out)
+	}
+}
+
+func TestTaskInstanceLogDownloadRejectsJSONError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 50060, "msg": "task instance not found"})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	outPath := filepath.Join(t.TempDir(), "err.log")
+	out, err := executeRoot(t, "task-instance", "log-download", "9", "--output", outPath)
+	if err == nil {
+		t.Fatal("expected error when download-log returns JSON error")
+	}
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		t.Fatal("must not write a file when the API returns a JSON error")
+	}
+	if !strings.Contains(out, `"ok": false`) {
+		t.Fatalf("expected error envelope:\n%s", out)
+	}
+}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -218,10 +219,16 @@ func newWorkflowDeleteCmd(flags *apiFlags) *cobra.Command {
 
 func newWorkflowGetDetailCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
+	var summary bool
 	c := &cobra.Command{
 		Use:   "get-detail <workflow-code>",
 		Short: "Get a workflow definition including task definitions and relations.",
-		Args:  cobra.ExactArgs(1),
+		Long: "get-detail returns the full workflow definition (task definitions + relations).\n\n" +
+			"--summary returns a compact view: workflow meta, global params, and one row per task\n" +
+			"(code/name/type/version) WITHOUT each task's rawScript. The full response embeds every\n" +
+			"task's script and can be megabytes; --summary is the AI-friendly way to find a task code\n" +
+			"by name before patch-task / task-def get.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectCode == 0 {
 				return fmt.Errorf("--project-code is required")
@@ -230,14 +237,99 @@ func newWorkflowGetDetailCmd(flags *apiFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return apiRun(cmd, *flags, "workflow.get-detail", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodGet,
-					fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, code), nil)
-			})
+			if !summary {
+				return apiRun(cmd, *flags, "workflow.get-detail", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
+					return client.JSON(ctx, http.MethodGet,
+						fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, code), nil)
+				})
+			}
+
+			client, profile, err := apiClient(*flags)
+			if err != nil {
+				writeAPIError(cmd, "workflow.get-detail", "CONFIG_ERROR", err)
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+			defer cancel()
+			resp, err := client.JSON(ctx, http.MethodGet,
+				fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, code), nil)
+			if err != nil {
+				writeAPIError(cmd, "workflow.get-detail", "DS_API_ERROR", err)
+				return err
+			}
+			data, err := summarizeWorkflowDetail(resp.Body)
+			if err != nil {
+				writeAPIError(cmd, "workflow.get-detail", "DECODE_ERROR", err)
+				return err
+			}
+			e := output.NewEnvelope("workflow.get-detail")
+			e.Summary = map[string]any{"cluster": profile.Name, "api_url": profile.APIURL, "http_status": resp.HTTPStatus}
+			e.Data = data
+			return e.Write(cmd.OutOrStdout())
 		},
 	}
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	c.Flags().BoolVar(&summary, "summary", false, "Compact task list (code/name/type/version) without rawScript")
 	return c
+}
+
+// summarizeWorkflowDetail extracts a compact view from the workflow-definition
+// response: workflow meta, global params, and one entry per task WITHOUT the
+// heavy rawScript. Keeps the agent from loading megabytes just to find a task code.
+func summarizeWorkflowDetail(body []byte) (map[string]any, error) {
+	var decoded struct {
+		Data struct {
+			WorkflowDefinition struct {
+				Code         int64  `json:"code"`
+				Name         string `json:"name"`
+				Version      int    `json:"version"`
+				ReleaseState string `json:"releaseState"`
+				ProjectCode  int64  `json:"projectCode"`
+				Description  string `json:"description"`
+				GlobalParams string `json:"globalParams"`
+			} `json:"workflowDefinition"`
+			TaskDefinitionList []struct {
+				Code        int64  `json:"code"`
+				Name        string `json:"name"`
+				TaskType    string `json:"taskType"`
+				Version     int    `json:"version"`
+				Flag        string `json:"flag"`
+				Description string `json:"description"`
+			} `json:"taskDefinitionList"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, fmt.Errorf("decode workflow detail: %w", err)
+	}
+	wf := decoded.Data.WorkflowDefinition
+	tasks := make([]map[string]any, 0, len(decoded.Data.TaskDefinitionList))
+	for _, t := range decoded.Data.TaskDefinitionList {
+		tasks = append(tasks, map[string]any{
+			"code":        t.Code,
+			"name":        t.Name,
+			"taskType":    t.TaskType,
+			"version":     t.Version,
+			"flag":        t.Flag,
+			"description": t.Description,
+		})
+	}
+	var globalParams any
+	if wf.GlobalParams != "" {
+		_ = json.Unmarshal([]byte(wf.GlobalParams), &globalParams)
+	}
+	return map[string]any{
+		"workflow": map[string]any{
+			"code":         wf.Code,
+			"name":         wf.Name,
+			"version":      wf.Version,
+			"releaseState": wf.ReleaseState,
+			"projectCode":  wf.ProjectCode,
+			"description":  wf.Description,
+		},
+		"globalParams": globalParams,
+		"taskCount":    len(tasks),
+		"tasks":        tasks,
+	}, nil
 }
 
 func newWorkflowPatchTaskCmd(flags *apiFlags) *cobra.Command {

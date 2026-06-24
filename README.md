@@ -126,11 +126,11 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 | `ds-cli config init/show` | Create a config template and inspect the effective profile |
 | `ds-cli config cluster add/list/activate/show` | Manage named DolphinScheduler API profiles (`show --reveal-token` or `--shell` for scripting) |
 | `ds-cli project create/list/get/delete` | Manage projects |
-| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | Manage workflow definitions; `get-detail` includes tasks + relations |
+| `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | Manage workflow definitions; `get-detail` includes tasks + relations (`--summary` for a compact task list without rawScript) |
 | `ds-cli workflow patch-task` | Swap one task's `rawScript` in a multi-task workflow (offline → update → restore release state) |
 | `ds-cli workflow start` | Trigger one workflow run via `/executors/start-workflow-instance` |
 | `ds-cli workflow-instance list/get/tasks/control/delete` | Inspect and control workflow instances (`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`) |
-| `ds-cli task-instance list/log/log-download/force-success/stop` | Inspect task instances and pull worker logs |
+| `ds-cli task-instance list/log/log-download/force-success/stop` | Inspect task instances and pull worker logs (`log --full` for the whole log, `log-download` saves to a file) |
 | `ds-cli task-def get/update` | Read or update a single task definition by code (uses `with-upstream`) |
 | `ds-cli task create/online/offline/delete/get/list` | Create and operate single-task workflows |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | Manage workflow schedules |
@@ -186,6 +186,8 @@ ds-cli workflow list --project-code <project-code>
 
 # Read a workflow with all its task definitions + relations:
 ds-cli workflow get-detail <workflow-code> --project-code <project-code>
+# Compact view (task code/name/type/version, no rawScript) to find a task code by name:
+ds-cli workflow get-detail <workflow-code> --project-code <project-code> --summary
 
 # Swap one task's rawScript in-place (auto offline/online cycle):
 ds-cli workflow patch-task <workflow-code> \
@@ -208,7 +210,14 @@ ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
 
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+
+# One page of the log (envelope passthrough):
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
+# Whole log to a file, never silently truncated; stdout is only a summary. --clean strips DS prefixes:
+ds-cli task-instance log <task-instance-id> --full --output ./ti.log
+ds-cli task-instance log <task-instance-id> --full --clean --output ./ti.clean.log
+# Download the whole log via /log/download-log; defaults to <tmpdir>/ds-cli/<id>.log, stdout is a summary:
+ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
 ```
