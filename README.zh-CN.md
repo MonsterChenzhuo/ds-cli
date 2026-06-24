@@ -164,13 +164,23 @@ ds-cli task create extract_orders \
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
 ds-cli task delete <workflow-code>
+
+# 创建时一步注入全局参数（带 DS 时间占位符时务必用 --global-params-file，见下方说明）：
+ds-cli task create rewrite_index \
+  --project-code <project-code> \
+  --script-file ./rewrite.sh \
+  --global-params-file ./global_params.json
 ```
+
+> **`$[...]` 时间占位符的坑**：DS 内置时间变量形如 `$[yyyy-MM-dd-1]`，而 `$[...]` 正好是 bash/zsh 的算术展开语法，直接写进 `--global-params '...'` 会被 shell 吞掉、破坏 JSON。凡是全局参数里含 `$[...]`，一律用 `--global-params-file <file>` 从文件读取来绕开 shell 转义。`task create`、`workflow create`、`workflow update` 都支持 `--global-params` 与 `--global-params-file`（二者互斥），并会在本地校验 JSON。
 
 需要直接管理普通工作流定义时，使用 `workflow`：
 
 ```bash
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow update <workflow-code> --name daily_job_v2
+# update 也接受 --project-code（与其他子命令保持一致，update 本身按 code 定位，不强制）
+ds-cli workflow update <workflow-code> --global-params-file ./global_params.json --release-state ONLINE
 ds-cli workflow list --project-code <project-code>
 
 # 读取一个工作流及其所有 task 定义和上下游关系：

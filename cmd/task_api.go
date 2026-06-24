@@ -32,6 +32,7 @@ func newTaskCmd() *cobra.Command {
 func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 	var projectCode, environmentCode int64
 	var workflowName, description, taskType, script, scriptFile, workerGroup string
+	var globalParams, globalParamsFile string
 	c := &cobra.Command{
 		Use:   "create <task-name>",
 		Short: "Create an offline single-task workflow definition.",
@@ -53,6 +54,10 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 			if script == "" {
 				return fmt.Errorf("--script or --script-file is required")
 			}
+			gp, err := resolveGlobalParams(globalParams, globalParamsFile)
+			if err != nil {
+				return err
+			}
 			return apiRun(cmd, *flags, "task.create", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
 				code, err := generateTaskCode(ctx, client, projectCode)
 				if err != nil {
@@ -68,6 +73,7 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 					Script:          script,
 					WorkerGroup:     workerGroup,
 					EnvironmentCode: environmentCode,
+					GlobalParams:    gp,
 				})
 				if err != nil {
 					return nil, err
@@ -84,6 +90,8 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().StringVar(&scriptFile, "script-file", "", "Read task raw script from file")
 	c.Flags().StringVar(&workerGroup, "worker-group", "default", "Worker group")
 	c.Flags().Int64Var(&environmentCode, "environment-code", 0, "Environment code; 0 means unset")
+	c.Flags().StringVar(&globalParams, "global-params", "", "Global params JSON array")
+	c.Flags().StringVar(&globalParamsFile, "global-params-file", "", "Read global params JSON from file (use for DS time placeholders like $[yyyy-MM-dd-1])")
 	return c
 }
 

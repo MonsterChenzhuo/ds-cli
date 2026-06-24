@@ -62,4 +62,40 @@ func TestSingleTaskWorkflowFormBuildsShellDAG(t *testing.T) {
 	if relations[0]["preTaskCode"].(float64) != 0 || relations[0]["postTaskCode"].(float64) != 987 {
 		t.Fatalf("relation = %#v", relations[0])
 	}
+
+	if values.Get("globalParams") != "[]" {
+		t.Fatalf("default globalParams = %q, want []", values.Get("globalParams"))
+	}
+}
+
+func TestSingleTaskWorkflowFormCarriesGlobalParams(t *testing.T) {
+	gp := `[{"prop":"biz_date","direct":"IN","type":"VARCHAR","value":"$[yyyy-MM-dd-1]"}]`
+	form, err := SingleTaskWorkflowForm(SingleTaskWorkflow{
+		ProjectCode:  123,
+		WorkflowName: "daily_shell",
+		TaskName:     "extract",
+		TaskCode:     987,
+		Script:       "echo hello",
+		GlobalParams: gp,
+	})
+	if err != nil {
+		t.Fatalf("SingleTaskWorkflowForm returned error: %v", err)
+	}
+	if form.Get("globalParams") != gp {
+		t.Fatalf("globalParams = %q, want %q", form.Get("globalParams"), gp)
+	}
+}
+
+func TestSingleTaskWorkflowFormRejectsInvalidGlobalParams(t *testing.T) {
+	_, err := SingleTaskWorkflowForm(SingleTaskWorkflow{
+		ProjectCode:  123,
+		WorkflowName: "daily_shell",
+		TaskName:     "extract",
+		TaskCode:     987,
+		Script:       "echo hello",
+		GlobalParams: "not-json",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid global params JSON, got nil")
+	}
 }

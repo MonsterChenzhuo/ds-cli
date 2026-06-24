@@ -66,7 +66,8 @@ ds-cli task create extract \
   --project-code <project-code> \
   --workflow-name daily_extract \
   --type SHELL \
-  --script-file ./extract.sh
+  --script-file ./extract.sh \
+  --global-params-file ./global_params.json   # 可选；一步注入全局参数
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
 ds-cli task delete <workflow-code>
@@ -109,6 +110,8 @@ ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/
 ```
 
 > `schedule create` 现在默认 timezone 为 `UTC`，并要求 `--environment-code` 必填（运行 `ds-cli environment list` 找到现有 code）。`workflow patch-task` 默认会在更新后恢复原 release 状态；传 `--keep-offline` 可保持 OFFLINE。`task-instance log-download` 用 `--output FILE` 落盘并输出 envelope 摘要；不带 `--output` 则把字节流写到 stdout（这是 ds-cli 里唯一一个允许 stdout 非 envelope 的命令）。
+
+> **全局参数与 `$[...]` 时间占位符**：`task create`、`workflow create`、`workflow update` 都支持 `--global-params <json>` 和 `--global-params-file <file>`（二者互斥，本地校验 JSON）。DS 时间变量形如 `$[yyyy-MM-dd-1]`，与 bash/zsh 算术展开 `$[...]` 冲突，直接写进 `--global-params '...'` 会被 shell 吞掉破坏 JSON——**含 `$[...]` 时一律用 `--global-params-file`**。`workflow update` 也接受 `--project-code`（与其他子命令一致，按 code 定位、非必填）。
 
 ## 结果判断
 

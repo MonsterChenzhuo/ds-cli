@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ds-cli/ds-cli/internal/dsapi"
@@ -102,6 +104,35 @@ func formValues(kv ...string) url.Values {
 		}
 	}
 	return values
+}
+
+// resolveGlobalParams returns the global params JSON to send, preferring the
+// inline value but falling back to a file when --global-params-file is set.
+//
+// Reading from a file sidesteps the shell mangling DS time placeholders such as
+// $[yyyy-MM-dd-1]: the $[...] form collides with bash arithmetic expansion, so
+// passing it inline through --global-params usually corrupts the JSON. The two
+// flags are mutually exclusive. The result is validated as JSON so a malformed
+// payload fails locally with a clear message instead of at the DS API.
+func resolveGlobalParams(inline, file string) (string, error) {
+	if file != "" {
+		if inline != "" {
+			return "", fmt.Errorf("--global-params and --global-params-file are mutually exclusive")
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read --global-params-file: %w", err)
+		}
+		inline = string(b)
+	}
+	trimmed := strings.TrimSpace(inline)
+	if trimmed == "" {
+		return "", nil
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return "", fmt.Errorf("global params is not valid JSON (when using DS time placeholders like $[yyyy-MM-dd-1], pass them via --global-params-file to avoid shell expansion)")
+	}
+	return trimmed, nil
 }
 
 func int64Arg(s, name string) (int64, error) {

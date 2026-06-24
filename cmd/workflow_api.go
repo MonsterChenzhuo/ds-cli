@@ -36,7 +36,7 @@ func newWorkflowCmd() *cobra.Command {
 
 func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
-	var description, releaseState, globalParams, executionType string
+	var description, releaseState, globalParams, globalParamsFile, executionType string
 	var warningGroupID, timeout int
 	c := &cobra.Command{
 		Use:   "create <name>",
@@ -46,12 +46,19 @@ func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 			if projectCode == 0 {
 				return fmt.Errorf("--project-code is required")
 			}
+			gp, err := resolveGlobalParams(globalParams, globalParamsFile)
+			if err != nil {
+				return err
+			}
+			if gp == "" {
+				gp = "[]"
+			}
 			body := map[string]any{
 				"name":           args[0],
 				"description":    description,
 				"projectCode":    projectCode,
 				"releaseState":   releaseState,
-				"globalParams":   globalParams,
+				"globalParams":   gp,
 				"warningGroupId": warningGroupID,
 				"timeout":        timeout,
 				"executionType":  executionType,
@@ -64,7 +71,8 @@ func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
 	c.Flags().StringVar(&description, "description", "", "Workflow description")
 	c.Flags().StringVar(&releaseState, "release-state", "OFFLINE", "Release state: ONLINE or OFFLINE")
-	c.Flags().StringVar(&globalParams, "global-params", "[]", "Global params JSON")
+	c.Flags().StringVar(&globalParams, "global-params", "", "Global params JSON")
+	c.Flags().StringVar(&globalParamsFile, "global-params-file", "", "Read global params JSON from file (use for DS time placeholders like $[yyyy-MM-dd-1])")
 	c.Flags().StringVar(&executionType, "execution-type", "PARALLEL", "Execution type")
 	c.Flags().IntVar(&warningGroupID, "warning-group-id", 0, "Warning group ID")
 	c.Flags().IntVar(&timeout, "timeout", 0, "Workflow timeout minutes")
@@ -72,7 +80,8 @@ func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 }
 
 func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
-	var name, description, releaseState, globalParams, executionType, location string
+	var projectCode int64
+	var name, description, releaseState, globalParams, globalParamsFile, executionType, location string
 	var warningGroupID, timeout int
 	c := &cobra.Command{
 		Use:   "update <workflow-code>",
@@ -80,6 +89,10 @@ func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code, err := int64Arg(args[0], "workflow-code")
+			if err != nil {
+				return err
+			}
+			gp, err := resolveGlobalParams(globalParams, globalParamsFile)
 			if err != nil {
 				return err
 			}
@@ -93,8 +106,8 @@ func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 			if releaseState != "" {
 				body["releaseState"] = releaseState
 			}
-			if globalParams != "" {
-				body["globalParams"] = globalParams
+			if gp != "" {
+				body["globalParams"] = gp
 			}
 			if executionType != "" {
 				body["executionType"] = executionType
@@ -113,10 +126,14 @@ func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 			})
 		},
 	}
+	// Accepted for consistency with other workflow subcommands; the update API
+	// addresses the workflow by code alone, so this value is not required.
+	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code (accepted for consistency; not required by the update API)")
 	c.Flags().StringVar(&name, "name", "", "Workflow name")
 	c.Flags().StringVar(&description, "description", "", "Workflow description")
 	c.Flags().StringVar(&releaseState, "release-state", "", "Release state")
 	c.Flags().StringVar(&globalParams, "global-params", "", "Global params JSON")
+	c.Flags().StringVar(&globalParamsFile, "global-params-file", "", "Read global params JSON from file (use for DS time placeholders like $[yyyy-MM-dd-1])")
 	c.Flags().StringVar(&executionType, "execution-type", "", "Execution type")
 	c.Flags().StringVar(&location, "location", "", "Location JSON")
 	c.Flags().IntVar(&warningGroupID, "warning-group-id", 0, "Warning group ID")

@@ -164,13 +164,24 @@ ds-cli task create extract_orders \
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
 ds-cli task delete <workflow-code>
+
+# Inject global params at creation time (use --global-params-file for DS time
+# placeholders, see the note below):
+ds-cli task create rewrite_index \
+  --project-code <project-code> \
+  --script-file ./rewrite.sh \
+  --global-params-file ./global_params.json
 ```
+
+> **The `$[...]` time-placeholder pitfall**: DS built-in time variables look like `$[yyyy-MM-dd-1]`, and `$[...]` is exactly bash/zsh arithmetic expansion, so passing it inline through `--global-params '...'` lets the shell eat it and corrupt the JSON. Whenever global params contain `$[...]`, pass them via `--global-params-file <file>` to bypass shell expansion. `task create`, `workflow create`, and `workflow update` all accept `--global-params` and `--global-params-file` (mutually exclusive) and validate the JSON locally.
 
 Use `workflow` when the caller needs direct workflow-definition operations:
 
 ```bash
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow update <workflow-code> --name daily_job_v2
+# update also accepts --project-code (for consistency; update targets by code and does not require it)
+ds-cli workflow update <workflow-code> --global-params-file ./global_params.json --release-state ONLINE
 ds-cli workflow list --project-code <project-code>
 
 # Read a workflow with all its task definitions + relations:

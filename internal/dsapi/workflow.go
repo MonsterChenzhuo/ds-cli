@@ -19,6 +19,9 @@ type SingleTaskWorkflow struct {
 	WorkerGroup     string
 	EnvironmentCode int64
 	ReleaseState    string
+	// GlobalParams is the workflow-level global params JSON array. Empty means
+	// "[]" (no global params).
+	GlobalParams string
 }
 
 func SingleTaskWorkflowForm(in SingleTaskWorkflow) (url.Values, error) {
@@ -52,6 +55,12 @@ func SingleTaskWorkflowForm(in SingleTaskWorkflow) (url.Values, error) {
 	releaseState := strings.ToUpper(strings.TrimSpace(in.ReleaseState))
 	if releaseState == "" {
 		releaseState = "OFFLINE"
+	}
+	globalParams := strings.TrimSpace(in.GlobalParams)
+	if globalParams == "" {
+		globalParams = "[]"
+	} else if !json.Valid([]byte(globalParams)) {
+		return nil, errors.New("global params is not valid JSON")
 	}
 
 	taskParams := map[string]any{
@@ -110,7 +119,7 @@ func SingleTaskWorkflowForm(in SingleTaskWorkflow) (url.Values, error) {
 	values := url.Values{}
 	values.Set("name", in.WorkflowName)
 	values.Set("description", in.Description)
-	values.Set("globalParams", "[]")
+	values.Set("globalParams", globalParams)
 	values.Set("locations", string(locationJSON))
 	values.Set("timeout", "0")
 	values.Set("taskRelationJson", string(relationJSON))
