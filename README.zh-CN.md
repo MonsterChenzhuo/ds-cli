@@ -164,7 +164,7 @@ ds-cli task create extract_orders \
 
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
-ds-cli task delete <workflow-code>
+ds-cli task delete <workflow-code> --project-code <project-code>
 
 # 创建时一步注入全局参数（带 DS 时间占位符时务必用 --global-params-file，见下方说明）：
 ds-cli task create rewrite_index \

@@ -164,7 +164,7 @@ ds-cli task create extract_orders \
 
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
-ds-cli task delete <workflow-code>
+ds-cli task delete <workflow-code> --project-code <project-code>
 
 # Inject global params at creation time (use --global-params-file for DS time
 # placeholders, see the note below):

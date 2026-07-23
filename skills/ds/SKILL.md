@@ -71,7 +71,7 @@ ds-cli task create extract \
   --global-params-file ./global_params.json   # 可选；一步注入全局参数
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
-ds-cli task delete <workflow-code>
+ds-cli task delete <workflow-code> --project-code <project-code>
 
 # 一次创建带依赖的多任务 DAG（一个 JSON 文件描述整图，自动批量生成 task code、解析依赖、可选上线）
 ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
@@ -116,6 +116,8 @@ ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/
 > `schedule create` 现在默认 timezone 为 `UTC`，并要求 `--environment-code` 必填（运行 `ds-cli environment list` 找到现有 code）。`workflow patch-task` 默认会在更新后恢复原 release 状态；传 `--keep-offline` 可保持 OFFLINE。`task-instance log-download` 用 `--output FILE` 落盘并输出 envelope 摘要；不带 `--output` 则把字节流写到 stdout（这是 ds-cli 里唯一一个允许 stdout 非 envelope 的命令）。
 
 > **全局参数与 `$[...]` 时间占位符**：`task create`、`workflow create`、`workflow update` 都支持 `--global-params <json>` 和 `--global-params-file <file>`（二者互斥，本地校验 JSON）。DS 时间变量形如 `$[yyyy-MM-dd-1]`，与 bash/zsh 算术展开 `$[...]` 冲突，直接写进 `--global-params '...'` 会被 shell 吞掉破坏 JSON——**含 `$[...]` 时一律用 `--global-params-file`**。`workflow update` 也接受 `--project-code`（与其他子命令一致，按 code 定位、非必填）。
+
+> **`delete`/`get` 需要 `--project-code`**：`workflow get`、`workflow delete`、`task get`、`task delete` 走项目内旧端点 `/projects/{projectCode}/workflow-definition/{code}`，因此都必须带 `--project-code`。不要依赖 `/v2/workflows/{code}` open-api——部分 DS 部署把该前缀路由到前端页面，会返回 HTML 而非 JSON。
 
 > **`workflow create-dag` 建多任务 DAG**：需要建带依赖的多任务工作流时用它，不要手拼 `taskDefinitionJson`。`--file` 指向一个 JSON：顶层 `name`/`description`/`executionType`/`releaseState`（`ONLINE` 则创建后自动上线）/`environmentCode`/`workerGroup`/`globalParams`（数组，写文件里天然规避 `$[...]` 被 shell 吞）/`tasks`。每个 task：`name`（唯一）、`type`（SHELL/PYTHON）、`script` 或 `scriptFile`（二选一，`scriptFile` 相对 DAG 文件目录）、`deps`（上游 task 名数组，空=根节点）、可选 `failRetryTimes`/`failRetryInterval`/`environmentCode`/`workerGroup`。CLI 自动按 ≤100 一批生成 task code、解析依赖成关系、布局节点；本地先校验（重名/依赖不存在/自依赖/成环），坏 DAG 联网前即报错。返回 envelope 的 summary 含 `workflow_code`、`task_codes`、`final_release_state`。JSON 字段有拼写错误会因严格解析直接报错。
 

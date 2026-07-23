@@ -341,20 +341,30 @@ func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 }
 
 func newWorkflowGetCmd(flags *apiFlags) *cobra.Command {
-	return &cobra.Command{
+	var projectCode int64
+	c := &cobra.Command{
 		Use:   "get <workflow-code>",
 		Short: "Get a workflow definition.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectCode == 0 {
+				return fmt.Errorf("--project-code is required")
+			}
 			code, err := int64Arg(args[0], "workflow-code")
 			if err != nil {
 				return err
 			}
+			// Use the project-scoped legacy endpoint: the /v2/workflows open-api
+			// prefix is routed to the web UI (returns HTML) on the DS deployments
+			// we target, so the JSON-only v2 path is unusable there.
 			return apiRun(cmd, *flags, "workflow.get", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodGet, fmt.Sprintf("/v2/workflows/%d", code), nil)
+				return client.JSON(ctx, http.MethodGet,
+					fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, code), nil)
 			})
 		},
 	}
+	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	return c
 }
 
 func newWorkflowListCmd(flags *apiFlags) *cobra.Command {
@@ -399,20 +409,29 @@ func newWorkflowReleaseCmd(flags *apiFlags, name, state string) *cobra.Command {
 }
 
 func newWorkflowDeleteCmd(flags *apiFlags) *cobra.Command {
-	return &cobra.Command{
+	var projectCode int64
+	c := &cobra.Command{
 		Use:   "delete <workflow-code>",
 		Short: "Delete a workflow definition.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectCode == 0 {
+				return fmt.Errorf("--project-code is required")
+			}
 			code, err := int64Arg(args[0], "workflow-code")
 			if err != nil {
 				return err
 			}
+			// Use the project-scoped legacy endpoint; the /v2/workflows open-api
+			// prefix returns the web UI (HTML) on the DS deployments we target.
 			return apiRun(cmd, *flags, "workflow.delete", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodDelete, fmt.Sprintf("/v2/workflows/%d", code), nil)
+				return client.JSON(ctx, http.MethodDelete,
+					fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, code), nil)
 			})
 		},
 	}
+	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	return c
 }
 
 func newWorkflowGetDetailCmd(flags *apiFlags) *cobra.Command {

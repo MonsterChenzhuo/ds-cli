@@ -70,7 +70,7 @@ ds-cli task create extract \
   --script-file ./extract.sh
 ds-cli task online <workflow-code> --project-code <project-code>
 ds-cli task offline <workflow-code> --project-code <project-code>
-ds-cli task delete <workflow-code>
+ds-cli task delete <workflow-code> --project-code <project-code>
 
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow list --project-code <project-code>

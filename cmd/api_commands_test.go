@@ -867,3 +867,53 @@ func TestTaskInstanceLogDownloadRejectsJSONError(t *testing.T) {
 		t.Fatalf("expected error envelope:\n%s", out)
 	}
 }
+
+func TestWorkflowDeleteUsesLegacyProjectEndpoint(t *testing.T) {
+	var sawPath, sawMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		sawMethod = r.Method
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": true})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	// Missing --project-code must fail locally, before any request.
+	if _, err := executeRoot(t, "workflow", "delete", "999"); err == nil {
+		t.Fatal("expected error when --project-code is missing")
+	}
+
+	out, err := executeRoot(t, "workflow", "delete", "999", "--project-code", "42")
+	if err != nil {
+		t.Fatalf("workflow delete: %v", err)
+	}
+	// Must hit the project-scoped legacy endpoint, never the UI-routed /v2/workflows path.
+	if sawMethod != http.MethodDelete || sawPath != "/dolphinscheduler/projects/42/workflow-definition/999" {
+		t.Fatalf("delete hit %s %s, want DELETE /dolphinscheduler/projects/42/workflow-definition/999", sawMethod, sawPath)
+	}
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("expected ok envelope:\n%s", out)
+	}
+}
+
+func TestTaskDeleteUsesLegacyProjectEndpoint(t *testing.T) {
+	var sawPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": true})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	if _, err := executeRoot(t, "task", "delete", "555"); err == nil {
+		t.Fatal("expected error when --project-code is missing")
+	}
+	if _, err := executeRoot(t, "task", "delete", "555", "--project-code", "42"); err != nil {
+		t.Fatalf("task delete: %v", err)
+	}
+	if sawPath != "/dolphinscheduler/projects/42/workflow-definition/555" {
+		t.Fatalf("task delete hit %s, want /dolphinscheduler/projects/42/workflow-definition/555", sawPath)
+	}
+}
