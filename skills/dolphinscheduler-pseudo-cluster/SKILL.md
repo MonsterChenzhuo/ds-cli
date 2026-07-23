@@ -52,7 +52,7 @@ ds-cli project list
 1. 先执行 `ds-cli project list` 确认可连通。
 2. 需要创建项目时执行 `ds-cli project create <name>`。
 3. agent 生成单脚本任务时，优先执行 `ds-cli task create`，再根据需要 `task online`。
-4. 已有复杂工作流时，使用 `workflow` 命令直接管理工作流定义；用 `workflow get-detail` 读完整结构（含 task + 关系），用 `workflow patch-task` 改某个 task 的 rawScript，用 `workflow start` 立即触发一次。
+4. 已有复杂工作流时，使用 `workflow` 命令直接管理工作流定义；用 `workflow get-detail` 读完整结构（含 task + 关系），用 `workflow patch-task` 改某个 task 的 rawScript，用 `workflow start` 立即触发一次。需要新建带依赖的多任务 DAG 时用 `workflow create-dag --file dag.json`（一个 JSON 描述整图，自动批量生成 task code、解析依赖、可选上线），不要手拼 taskDefinitionJson。
 5. 任务跑起来后用 `workflow-instance list/get/control` 跟实例状态，用 `task-instance list/log/log-download` 拉日志，用 `task-instance force-success/stop` 处置异常。
 6. 需要按 task code 操作时用 `task-def get/update`。
 7. 需要定时运行时，使用 `schedule create`（默认 timezone=UTC，必须传 `--environment-code`）。
@@ -74,6 +74,9 @@ ds-cli task delete <workflow-code>
 
 ds-cli workflow create daily_job --project-code <project-code>
 ds-cli workflow list --project-code <project-code>
+
+# 一次创建带依赖的多任务 DAG（一个 JSON 文件描述整图）
+ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
 
 # 多任务工作流：读全量、按 task code 改、立即触发
 ds-cli workflow get-detail <workflow-code> --project-code <project-code>

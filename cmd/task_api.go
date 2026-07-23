@@ -117,6 +117,51 @@ func generateTaskCode(ctx context.Context, client *dsapi.Client, projectCode int
 	return code, nil
 }
 
+// generateTaskCodes returns n task codes, calling gen-task-codes in batches of
+// at most 100. DS 3.4.1 rejects genNum > 100 with "数据[...]无效", so callers that
+// need many codes (e.g. a multi-task DAG) must batch. Codes are returned in the
+// order the API produced them.
+func generateTaskCodes(ctx context.Context, client *dsapi.Client, projectCode int64, n int) ([]int64, error) {
+	if n <= 0 {
+		return nil, fmt.Errorf("number of task codes must be positive, got %d", n)
+	}
+	const maxBatch = 100
+	codes := make([]int64, 0, n)
+	for len(codes) < n {
+		batch := n - len(codes)
+		if batch > maxBatch {
+			batch = maxBatch
+		}
+		resp, err := client.Form(ctx, http.MethodGet,
+			fmt.Sprintf("/projects/%d/task-definition/gen-task-codes", projectCode),
+			formValues("genNum", strconv.Itoa(batch)),
+		)
+		if err != nil {
+			return nil, err
+		}
+		var decoded struct {
+			Data []json.Number `json:"data"`
+		}
+		if err := json.Unmarshal(resp.Body, &decoded); err != nil {
+			return nil, fmt.Errorf("decode gen-task-codes response: %w", err)
+		}
+		if len(decoded.Data) == 0 {
+			return nil, fmt.Errorf("gen-task-codes returned no codes: %s", string(resp.Body))
+		}
+		for _, d := range decoded.Data {
+			code, err := d.Int64()
+			if err != nil {
+				return nil, fmt.Errorf("gen-task-codes returned non-integer code %q: %w", d.String(), err)
+			}
+			codes = append(codes, code)
+			if len(codes) == n {
+				break
+			}
+		}
+	}
+	return codes, nil
+}
+
 func findFirstNumber(v any, key string) (int64, bool) {
 	switch t := v.(type) {
 	case map[string]any:

@@ -127,6 +127,7 @@ ds-cli project list
 | `ds-cli config cluster add/list/activate/show` | 管理本地命名 DS API profile（`show --reveal-token` / `--shell` 便于脚本集成） |
 | `ds-cli project create/list/get/delete` | 管理项目 |
 | `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | 管理工作流定义；`get-detail` 一次返回工作流 + 全部 task + 关系（`--summary` 给不含 rawScript 的精简 task 列表） |
+| `ds-cli workflow create-dag` | 用一个 JSON 文件一次创建带依赖的多任务工作流（DAG），自动批量生成 task code |
 | `ds-cli workflow patch-task` | 替换多任务工作流中某个 task 的 `rawScript`（自动 offline → 更新 → 恢复 release 状态） |
 | `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流 |
 | `ds-cli workflow-instance list/get/tasks/control/delete` | 查询和控制工作流实例（`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`） |
@@ -194,11 +195,44 @@ ds-cli workflow patch-task <workflow-code> \
   --task-code <task-code> \
   --raw-script-file ./new_check_partition.sh
 
+# 一次创建带依赖的多任务 DAG：
+ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
+
 # 立即触发一次工作流：
 ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
 ```
+
+#### 用 `workflow create-dag` 创建多任务 DAG
+
+`workflow create` 只能建**空**工作流，`task create` 只能建**单** task 工作流，所以以前要建带依赖的 DAG，只能自己手拼 `taskDefinitionJson`/`taskRelationJson`、手调 `gen-task-codes`。`workflow create-dag` 用一个 JSON 文件把这些全包了：为每个 task 批量生成 task code（按 ≤100 一批，符合 DS 3.4.1 限制），把基于名字的依赖解析成关系，自动布局节点，先以 OFFLINE 创建，若 `releaseState` 为 `ONLINE` 再上线。整个 DAG 会**先在本地校验**（名字唯一、依赖存在、禁止自依赖、禁止成环），坏 DAG 在联网创建前就报错，不会在远端留下半成品。
+
+```json
+{
+  "name": "risk_datacache_paimon_sync",
+  "description": "country_v2_di -> country_v2_paimon",
+  "executionType": "PARALLEL",
+  "releaseState": "ONLINE",
+  "environmentCode": 173713482496544,
+  "workerGroup": "default",
+  "globalParams": [
+    {"prop": "src_db",   "value": "indonesia_dw",     "direct": "IN", "type": "VARCHAR"},
+    {"prop": "biz_date", "value": "$[yyyy-MM-dd-1]",  "direct": "IN", "type": "VARCHAR"}
+  ],
+  "tasks": [
+    {"name": "check_partition",   "type": "SHELL", "scriptFile": "check_partition.sh",   "deps": []},
+    {"name": "diff_alter_schema", "type": "SHELL", "scriptFile": "diff_alter_schema.sh", "deps": ["check_partition"]},
+    {"name": "sync_partition",    "type": "SHELL", "scriptFile": "sync_partition.sh",    "deps": ["diff_alter_schema"]}
+  ]
+}
+```
+
+- `scriptFile` 相对 DAG 文件所在目录解析；也可以用 `script` 直接写内联脚本（每个 task 二选一）。
+- `deps` 引用上游 task **名字**；空列表表示根节点。只要是无环图，任意依赖结构都支持。
+- 顶层 `environmentCode`/`workerGroup` 是默认值，单个 task 可覆盖。
+- `globalParams` 从文件读取，所以 `$[yyyy-MM-dd-1]` 这类 DS 时间占位符不会被 shell 吞掉。
+- 每个 task 可选 `failRetryTimes`/`failRetryInterval`（默认 `0`/`1`）。
 
 ### 工作流实例与任务实例
 

@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ds-cli/ds-cli/internal/dsapi"
@@ -23,6 +26,7 @@ func newWorkflowCmd() *cobra.Command {
 	}
 	addAPIFlags(cmd, &flags)
 	cmd.AddCommand(newWorkflowCreateCmd(&flags))
+	cmd.AddCommand(newWorkflowCreateDagCmd(&flags))
 	cmd.AddCommand(newWorkflowUpdateCmd(&flags))
 	cmd.AddCommand(newWorkflowGetCmd(&flags))
 	cmd.AddCommand(newWorkflowGetDetailCmd(&flags))
@@ -77,6 +81,200 @@ func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().StringVar(&executionType, "execution-type", "PARALLEL", "Execution type")
 	c.Flags().IntVar(&warningGroupID, "warning-group-id", 0, "Warning group ID")
 	c.Flags().IntVar(&timeout, "timeout", 0, "Workflow timeout minutes")
+	return c
+}
+
+// dagFile is the --file JSON schema for `workflow create-dag`.
+type dagFile struct {
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	ExecutionType   string          `json:"executionType"`
+	ReleaseState    string          `json:"releaseState"`
+	Timeout         int             `json:"timeout"`
+	EnvironmentCode int64           `json:"environmentCode"`
+	WorkerGroup     string          `json:"workerGroup"`
+	GlobalParams    json.RawMessage `json:"globalParams"`
+	Tasks           []dagFileTask   `json:"tasks"`
+}
+
+type dagFileTask struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	Type              string   `json:"type"`
+	Script            string   `json:"script"`
+	ScriptFile        string   `json:"scriptFile"`
+	WorkerGroup       string   `json:"workerGroup"`
+	EnvironmentCode   int64    `json:"environmentCode"`
+	FailRetryTimes    int      `json:"failRetryTimes"`
+	FailRetryInterval int      `json:"failRetryInterval"`
+	Deps              []string `json:"deps"`
+}
+
+func newWorkflowCreateDagCmd(flags *apiFlags) *cobra.Command {
+	var projectCode int64
+	var file string
+	c := &cobra.Command{
+		Use:   "create-dag",
+		Short: "Create a multi-task workflow (DAG) with dependencies from a single JSON file.",
+		Long: "create-dag builds a whole workflow in one call: it batch-generates task codes, resolves\n" +
+			"name-based dependencies into relations, lays out nodes, creates the workflow OFFLINE, and\n" +
+			"(when releaseState is ONLINE) onlines it. Each task's script is inline (\"script\") or read\n" +
+			"from a file (\"scriptFile\", resolved relative to the --file directory). Global params are read\n" +
+			"from the file, avoiding shell mangling of DS time placeholders like $[yyyy-MM-dd-1].",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectCode == 0 {
+				return fmt.Errorf("--project-code is required")
+			}
+			if file == "" {
+				return fmt.Errorf("--file is required")
+			}
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				return fmt.Errorf("read --file: %w", err)
+			}
+			var spec dagFile
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&spec); err != nil {
+				return fmt.Errorf("parse DAG file: %w", err)
+			}
+			if len(spec.Tasks) == 0 {
+				return fmt.Errorf("DAG file must contain at least one task")
+			}
+
+			baseDir := filepath.Dir(file)
+			dag := dsapi.MultiTaskDAG{
+				Name:          spec.Name,
+				Description:   spec.Description,
+				ExecutionType: spec.ExecutionType,
+				Timeout:       spec.Timeout,
+				GlobalParams:  strings.TrimSpace(string(spec.GlobalParams)),
+			}
+			for i, t := range spec.Tasks {
+				if t.Script != "" && t.ScriptFile != "" {
+					return fmt.Errorf("task %q: set only one of script or scriptFile", t.Name)
+				}
+				script := t.Script
+				if t.ScriptFile != "" {
+					p := t.ScriptFile
+					if !filepath.IsAbs(p) {
+						p = filepath.Join(baseDir, p)
+					}
+					b, err := os.ReadFile(p)
+					if err != nil {
+						return fmt.Errorf("task %q: read scriptFile: %w", t.Name, err)
+					}
+					script = string(b)
+				}
+				if script == "" {
+					return fmt.Errorf("task[%d] %q: script or scriptFile is required", i, t.Name)
+				}
+				env := t.EnvironmentCode
+				if env == 0 {
+					env = spec.EnvironmentCode
+				}
+				wg := t.WorkerGroup
+				if wg == "" {
+					wg = spec.WorkerGroup
+				}
+				dag.Tasks = append(dag.Tasks, dsapi.DAGTask{
+					Name:              t.Name,
+					Description:       t.Description,
+					TaskType:          t.Type,
+					Script:            script,
+					WorkerGroup:       wg,
+					EnvironmentCode:   env,
+					FailRetryTimes:    t.FailRetryTimes,
+					FailRetryInterval: t.FailRetryInterval,
+					Deps:              t.Deps,
+				})
+			}
+
+			// Validate the whole DAG locally before any network call, so a malformed
+			// DAG (bad deps, cycle, dup names, ...) fails fast without wasting task
+			// codes or leaving partial state on the server.
+			if err := dsapi.ValidateDAG(dag); err != nil {
+				writeAPIError(cmd, "workflow.create-dag", "CONFIG_ERROR", err)
+				return err
+			}
+
+			client, profile, err := apiClient(*flags)
+			if err != nil {
+				writeAPIError(cmd, "workflow.create-dag", "CONFIG_ERROR", err)
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+			defer cancel()
+
+			codes, err := generateTaskCodes(ctx, client, projectCode, len(dag.Tasks))
+			if err != nil {
+				writeAPIError(cmd, "workflow.create-dag", "DS_API_ERROR", err)
+				return err
+			}
+			for i := range dag.Tasks {
+				dag.Tasks[i].Code = codes[i]
+			}
+
+			form, err := dsapi.MultiTaskWorkflowForm(dag)
+			if err != nil {
+				// Local validation failure (bad DAG); no partial state created remotely.
+				writeAPIError(cmd, "workflow.create-dag", "CONFIG_ERROR", err)
+				return err
+			}
+
+			createResp, err := client.Form(ctx, http.MethodPost,
+				fmt.Sprintf("/projects/%d/workflow-definition", projectCode), form)
+			if err != nil {
+				writeAPIError(cmd, "workflow.create-dag", "DS_API_ERROR", err)
+				return err
+			}
+			var created struct {
+				Data struct {
+					Code int64 `json:"code"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(createResp.Body, &created); err != nil {
+				writeAPIError(cmd, "workflow.create-dag", "DECODE_ERROR", err)
+				return err
+			}
+
+			finalState := "OFFLINE"
+			if strings.EqualFold(strings.TrimSpace(spec.ReleaseState), "ONLINE") {
+				if created.Data.Code == 0 {
+					err := fmt.Errorf("workflow created but response did not contain a workflow code; cannot online")
+					writeAPIError(cmd, "workflow.create-dag", "DS_API_ERROR", err)
+					return err
+				}
+				if _, err := releaseWorkflow(ctx, client, projectCode, created.Data.Code, "ONLINE"); err != nil {
+					writeAPIError(cmd, "workflow.create-dag", "DS_API_ERROR", err)
+					return err
+				}
+				finalState = "ONLINE"
+			}
+
+			var createdBody any
+			if err := json.Unmarshal(createResp.Body, &createdBody); err != nil {
+				createdBody = string(createResp.Body)
+			}
+			e := output.NewEnvelope("workflow.create-dag")
+			e.Summary = map[string]any{
+				"cluster":             profile.Name,
+				"api_url":             profile.APIURL,
+				"http_status":         createResp.HTTPStatus,
+				"project_code":        projectCode,
+				"workflow_code":       created.Data.Code,
+				"workflow_name":       spec.Name,
+				"task_codes":          codes,
+				"task_count":          len(codes),
+				"final_release_state": finalState,
+			}
+			e.Data = createdBody
+			return e.Write(cmd.OutOrStdout())
+		},
+	}
+	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	c.Flags().StringVar(&file, "file", "", "Path to the DAG definition JSON file")
 	return c
 }
 

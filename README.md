@@ -127,6 +127,7 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 | `ds-cli config cluster add/list/activate/show` | Manage named DolphinScheduler API profiles (`show --reveal-token` or `--shell` for scripting) |
 | `ds-cli project create/list/get/delete` | Manage projects |
 | `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | Manage workflow definitions; `get-detail` includes tasks + relations (`--summary` for a compact task list without rawScript) |
+| `ds-cli workflow create-dag` | Create a whole multi-task workflow (DAG with dependencies) from one JSON file, batch-generating task codes |
 | `ds-cli workflow patch-task` | Swap one task's `rawScript` in a multi-task workflow (offline → update → restore release state) |
 | `ds-cli workflow start` | Trigger one workflow run via `/executors/start-workflow-instance` |
 | `ds-cli workflow-instance list/get/tasks/control/delete` | Inspect and control workflow instances (`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`) |
@@ -195,11 +196,44 @@ ds-cli workflow patch-task <workflow-code> \
   --task-code <task-code> \
   --raw-script-file ./new_check_partition.sh
 
+# Create a whole multi-task DAG (with dependencies) in one call:
+ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
+
 # Trigger one run right now:
 ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
 ```
+
+#### Multi-task DAGs with `workflow create-dag`
+
+`workflow create` only makes an *empty* workflow and `task create` only makes a *single*-task one, so building a DAG with dependencies used to mean hand-assembling `taskDefinitionJson`/`taskRelationJson` and calling `gen-task-codes` yourself. `workflow create-dag` does all of that from one JSON file: it batch-generates one task code per task (in batches of ≤100, the DS 3.4.1 limit), resolves name-based dependencies into relations, lays out the nodes, creates the workflow OFFLINE, and — when `releaseState` is `ONLINE` — onlines it. The whole DAG is validated locally first (unique names, existing deps, no self-dependency, no cycles), so a bad DAG fails before anything is created remotely.
+
+```json
+{
+  "name": "risk_datacache_paimon_sync",
+  "description": "country_v2_di -> country_v2_paimon",
+  "executionType": "PARALLEL",
+  "releaseState": "ONLINE",
+  "environmentCode": 173713482496544,
+  "workerGroup": "default",
+  "globalParams": [
+    {"prop": "src_db",   "value": "indonesia_dw",     "direct": "IN", "type": "VARCHAR"},
+    {"prop": "biz_date", "value": "$[yyyy-MM-dd-1]",  "direct": "IN", "type": "VARCHAR"}
+  ],
+  "tasks": [
+    {"name": "check_partition",   "type": "SHELL", "scriptFile": "check_partition.sh",   "deps": []},
+    {"name": "diff_alter_schema", "type": "SHELL", "scriptFile": "diff_alter_schema.sh", "deps": ["check_partition"]},
+    {"name": "sync_partition",    "type": "SHELL", "scriptFile": "sync_partition.sh",    "deps": ["diff_alter_schema"]}
+  ]
+}
+```
+
+- `scriptFile` is resolved relative to the DAG file's directory; use `script` for an inline string instead (exactly one of the two per task).
+- `deps` references upstream task **names**; an empty list means a root node. Any dependency graph is allowed as long as it is acyclic.
+- Top-level `environmentCode`/`workerGroup` are defaults; a task may override either.
+- `globalParams` is read from the file, so DS time placeholders like `$[yyyy-MM-dd-1]` are never touched by the shell.
+- Optional per-task `failRetryTimes`/`failRetryInterval` (default `0`/`1`).
 
 ### Workflow and task instances
 
