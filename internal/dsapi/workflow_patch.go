@@ -153,6 +153,117 @@ func PatchWorkflowTask(ctx context.Context, client *Client, in WorkflowPatchInpu
 	return res, nil
 }
 
+// WorkflowMetaChanges holds the workflow-level fields a caller may update. A nil
+// pointer means "leave unchanged"; a non-nil pointer (even to an empty string)
+// means "set to this value".
+type WorkflowMetaChanges struct {
+	Name          *string
+	Description   *string
+	GlobalParams  *string
+	ExecutionType *string
+	Locations     *string
+	ReleaseState  *string
+	Timeout       *int
+}
+
+// UpdateWorkflowMeta updates workflow-level metadata via the legacy
+// PUT /projects/{}/workflow-definition/{code} endpoint. DS 3.4.1 has no /v2
+// controller and its legacy update requires the FULL definition (name +
+// taskDefinitionJson + taskRelationJson are mandatory), so this fetches the
+// current definition, preserves its existing tasks/relations verbatim, overlays
+// only the requested metadata changes, and PUTs the whole thing back. Returns the
+// raw PUT response.
+func UpdateWorkflowMeta(ctx context.Context, client *Client, projectCode, workflowCode int64, changes WorkflowMetaChanges) (*Response, error) {
+	if projectCode == 0 || workflowCode == 0 {
+		return nil, errors.New("project-code and workflow-code are required")
+	}
+
+	getResp, err := client.JSON(ctx, http.MethodGet,
+		fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, workflowCode), nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch workflow definition: %w", err)
+	}
+	var full struct {
+		Data struct {
+			WorkflowDefinition       map[string]any   `json:"workflowDefinition"`
+			WorkflowTaskRelationList []map[string]any `json:"workflowTaskRelationList"`
+			TaskDefinitionList       []map[string]any `json:"taskDefinitionList"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getResp.Body, &full); err != nil {
+		return nil, fmt.Errorf("decode workflow definition: %w", err)
+	}
+	wf := full.Data.WorkflowDefinition
+	if wf == nil {
+		return nil, errors.New("workflow definition payload missing 'workflowDefinition'")
+	}
+	if len(full.Data.TaskDefinitionList) == 0 {
+		return nil, errors.New("workflow has no task definitions; legacy update requires a non-empty definition")
+	}
+
+	cleanedTasks := make([]map[string]any, 0, len(full.Data.TaskDefinitionList))
+	for _, t := range full.Data.TaskDefinitionList {
+		cleanedTasks = append(cleanedTasks, stripDefinitionAuditFields(t,
+			"id", "userName", "projectName", "createTime", "updateTime",
+			"modifyBy", "operator", "operateTime", "taskParamList", "taskParamMap"))
+	}
+	cleanedRelations := make([]map[string]any, 0, len(full.Data.WorkflowTaskRelationList))
+	for _, r := range full.Data.WorkflowTaskRelationList {
+		cleanedRelations = append(cleanedRelations, stripDefinitionAuditFields(r,
+			"id", "createTime", "updateTime", "operator", "operateTime"))
+	}
+	taskDefinitionJSON, err := json.Marshal(cleanedTasks)
+	if err != nil {
+		return nil, err
+	}
+	taskRelationJSON, err := json.Marshal(cleanedRelations)
+	if err != nil {
+		return nil, err
+	}
+
+	// Start from existing values, then overlay requested changes.
+	name := stringField(wf, "name")
+	if changes.Name != nil {
+		name = *changes.Name
+	}
+	description := stringField(wf, "description")
+	if changes.Description != nil {
+		description = *changes.Description
+	}
+	globalParams := defaultString(stringField(wf, "globalParams"), "[]")
+	if changes.GlobalParams != nil {
+		globalParams = defaultString(*changes.GlobalParams, "[]")
+	}
+	executionType := defaultString(stringField(wf, "executionType"), "PARALLEL")
+	if changes.ExecutionType != nil {
+		executionType = defaultString(*changes.ExecutionType, "PARALLEL")
+	}
+	locations := defaultString(stringField(wf, "locations"), "[]")
+	if changes.Locations != nil {
+		locations = defaultString(*changes.Locations, "[]")
+	}
+	timeout := asInt64(wf["timeout"])
+	if changes.Timeout != nil {
+		timeout = int64(*changes.Timeout)
+	}
+
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("description", description)
+	form.Set("globalParams", globalParams)
+	form.Set("locations", locations)
+	form.Set("timeout", strconv.FormatInt(timeout, 10))
+	form.Set("executionType", executionType)
+	form.Set("taskDefinitionJson", string(taskDefinitionJSON))
+	form.Set("taskRelationJson", string(taskRelationJSON))
+	if changes.ReleaseState != nil && *changes.ReleaseState != "" {
+		form.Set("releaseState", *changes.ReleaseState)
+	}
+
+	return client.Form(ctx, http.MethodPut,
+		fmt.Sprintf("/projects/%d/workflow-definition/%d", projectCode, workflowCode), form)
+}
+
 // PatchTaskDefinition swaps a single task's rawScript via the with-upstream endpoint.
 // upstreamCodes may be empty.
 func PatchTaskDefinition(ctx context.Context, client *Client, projectCode, taskCode int64, newRawScript, upstreamCodes string) (*Response, error) {

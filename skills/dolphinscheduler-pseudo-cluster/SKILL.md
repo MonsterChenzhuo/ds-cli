@@ -55,7 +55,7 @@ ds-cli project list
 4. 已有复杂工作流时，使用 `workflow` 命令直接管理工作流定义；用 `workflow get-detail` 读完整结构（含 task + 关系），用 `workflow patch-task` 改某个 task 的 rawScript，用 `workflow start` 立即触发一次。需要新建带依赖的多任务 DAG 时用 `workflow create-dag --file dag.json`（一个 JSON 描述整图，自动批量生成 task code、解析依赖、可选上线），不要手拼 taskDefinitionJson。
 5. 任务跑起来后用 `workflow-instance list/get/control` 跟实例状态，用 `task-instance list/log/log-download` 拉日志，用 `task-instance force-success/stop` 处置异常。
 6. 需要按 task code 操作时用 `task-def get/update`。
-7. 需要定时运行时，使用 `schedule create`（默认 timezone=UTC，必须传 `--environment-code`）。
+7. 需要定时运行时，使用 `schedule create`（默认 timezone=UTC，必须传 `--environment-code` 和 `--project-code`；目标 workflow 需先 ONLINE）。DS 3.4.1 无 `/v2` open-api：`workflow get/delete/update`、`task get/delete`、`schedule create/update/get/delete` 都要带 `--project-code`；`workflow create`（空 workflow）无法创建，请改用 `workflow create-dag` 或 `task create`。
 8. 告警组使用 `alert group`，运行环境使用 `environment`。
 
 ## 常用命令
@@ -99,7 +99,9 @@ ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-def get <task-code> --project-code <project-code>
 ds-cli task-def update <task-code> --project-code <project-code> --raw-script-file ./new.sh
 
+# schedule create/update/get/delete 都需要 --project-code；建调度前目标 workflow 需 ONLINE
 ds-cli schedule create \
+  --project-code <project-code> \
   --workflow-code <workflow-code> \
   --crontab "0 0 3 * * ? *" \
   --start-time "2026-01-01 00:00:00" \

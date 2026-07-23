@@ -101,17 +101,23 @@ ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-def get <task-code> --project-code <project-code>
 ds-cli task-def update <task-code> --project-code <project-code> --raw-script-file ./new.sh
 
+# schedule create/update/get/delete 都需要 --project-code；目标 workflow 需先 ONLINE
 ds-cli schedule create \
+  --project-code <project-code> \
   --workflow-code <workflow-code> \
   --crontab "0 0 3 * * ? *" \
   --start-time "2026-01-01 00:00:00" \
   --end-time "2099-01-01 00:00:00" \
   --timezone UTC \
   --environment-code <env-code>
+ds-cli schedule get <schedule-id> --project-code <project-code>
+ds-cli schedule delete <schedule-id> --project-code <project-code>
 
 ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/python3"
 ```
+
+> **DS 3.4.1 端点规则（重要）**：该版本无 `/v2` open-api，ds-cli 统一走项目内旧端点。`workflow get/delete/update`、`task get/delete`、`schedule create/update/get/delete` **都必须带 `--project-code`**。`schedule get` 无单条接口，内部用分页 list + 本地按 id 过滤。`workflow create`（空 workflow）在 3.4.1 无法创建，会直接报错并提示改用 `workflow create-dag`（多任务）或 `task create`（单任务）。`workflow update` 会 GET 完整定义 → 保留 task/关系 → 只覆盖你传的字段 → PUT，只有传的 flag 会变。建调度前目标 workflow 必须 ONLINE，且 `--tenant-code` 必须是集群里真实存在的租户。
 
 > `schedule create` 现在默认 timezone 为 `UTC`，并要求 `--environment-code` 必填（运行 `ds-cli environment list` 找到现有 code）。`workflow patch-task` 默认会在更新后恢复原 release 状态；传 `--keep-offline` 可保持 OFFLINE。`task-instance log-download` 用 `--output FILE` 落盘并输出 envelope 摘要；不带 `--output` 则把字节流写到 stdout（这是 ds-cli 里唯一一个允许 stdout 非 envelope 的命令）。
 

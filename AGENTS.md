@@ -140,9 +140,13 @@ API profile 默认路径：
 - 不要重新引入部署、SSH、ZooKeeper、MySQL 初始化、插件安装、systemd 或本地进程管理逻辑。
 - API 命令保持非交互式；所有输入通过 flag、环境变量、profile 或文件。
 - 对用户脚本内容使用文件读取或 JSON/form API，不要拼接 shell 命令。
-- 端点选择：`workflow`/`task` 的 `get`/`delete` 走项目内旧端点
-  `/projects/{projectCode}/workflow-definition/{code}`（因此需要 `--project-code`）。
-  不要依赖 `/v2/workflows/{code}` open-api——部分 DS 部署把该前缀路由到前端页面，返回 HTML 而非 JSON。
+- 端点选择（DS 3.4.1 无任何 `/v2` controller，一律用项目内旧端点）：
+  - `project create` → `POST /projects`（form）；`project get/delete` → `/projects/{code}`。
+  - `workflow get/delete/update`、`task get/delete` → `/projects/{projectCode}/workflow-definition/{code}`，**需 `--project-code`**。
+  - `workflow update` 走 GET-merge-PUT（`dsapi.UpdateWorkflowMeta`）：旧端点要求完整定义，故先 GET、保留 task/关系、只覆盖传入字段再 PUT。
+  - `workflow create`（空 workflow）3.4.1 不支持（旧端点 taskRelationJson/taskDefinitionJson 必填），直接报错引导用 `create-dag`/`task create`。
+  - `schedule create/update/get/delete` → `/projects/{projectCode}/schedules[/{id}]`，**需 `--project-code`**；create/update 把 crontab/startTime/endTime/timezoneId 打包成单个 `schedule` JSON 参数（form）。3.4.1 无单条 schedule GET，`schedule get` 用分页 list + 本地按 id 过滤。
+  - 绝不要用 `/v2/*`——真实 3.4.1 集群会返回前端 HTML 或 405。
 - 多任务 DAG 一律用 `workflow create-dag`（`internal/dsapi/workflow_dag.go`），不要手拼 `taskDefinitionJson`/`taskRelationJson`。
 - 修改安装脚本后必须执行 `bash -n scripts/install.sh`。
 - 不要把 `bin/`、`dist/` 等构建产物提交到仓库。

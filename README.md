@@ -174,15 +174,19 @@ ds-cli task create rewrite_index \
   --global-params-file ./global_params.json
 ```
 
-> **The `$[...]` time-placeholder pitfall**: DS built-in time variables look like `$[yyyy-MM-dd-1]`, and `$[...]` is exactly bash/zsh arithmetic expansion, so passing it inline through `--global-params '...'` lets the shell eat it and corrupt the JSON. Whenever global params contain `$[...]`, pass them via `--global-params-file <file>` to bypass shell expansion. `task create`, `workflow create`, and `workflow update` all accept `--global-params` and `--global-params-file` (mutually exclusive) and validate the JSON locally.
+> **The `$[...]` time-placeholder pitfall**: DS built-in time variables look like `$[yyyy-MM-dd-1]`, and `$[...]` is exactly bash/zsh arithmetic expansion, so passing it inline through `--global-params '...'` lets the shell eat it and corrupt the JSON. Whenever global params contain `$[...]`, pass them via `--global-params-file <file>` to bypass shell expansion. `task create`, `workflow create-dag`, and `workflow update` all accept `--global-params`/`--global-params-file` (mutually exclusive) and validate the JSON locally.
+
+> **DS 3.4.1 endpoint rule**: this DS build has **no `/v2` open-api controllers**, so ds-cli talks to the classic project-scoped endpoints. Practical consequence: `workflow get/delete/update`, `task get/delete`, and `schedule create/update/get/delete` all require `--project-code`. There is no single-schedule GET in 3.4.1 — `schedule get` pages the project's schedule list and filters by id locally. And an empty workflow cannot be created (`workflow create` errors out with guidance to use `create-dag`/`task create`).
 
 Use `workflow` when the caller needs direct workflow-definition operations:
 
 ```bash
-ds-cli workflow create daily_job --project-code <project-code>
-ds-cli workflow update <workflow-code> --name daily_job_v2
-# update also accepts --project-code (for consistency; update targets by code and does not require it)
-ds-cli workflow update <workflow-code> --global-params-file ./global_params.json --release-state ONLINE
+# NOTE: DS 3.4.1 cannot create an EMPTY workflow (its legacy endpoint requires at least
+# one task). Use `workflow create-dag` for a multi-task DAG, or `task create` for a single task.
+ds-cli workflow update <workflow-code> --project-code <project-code> --name daily_job_v2
+# update requires --project-code; it fetches the full definition, preserves tasks/relations,
+# and overlays only the flags you pass:
+ds-cli workflow update <workflow-code> --project-code <project-code> --global-params-file ./global_params.json --release-state ONLINE
 ds-cli workflow list --project-code <project-code>
 
 # Read a workflow with all its task definitions + relations:
@@ -266,7 +270,10 @@ ds-cli task-def update <task-code> --project-code <project-code> --raw-script-fi
 ### Schedules, Alerts, and Environments
 
 ```bash
+# schedule create/update/get/delete all require --project-code (path-scoped in DS 3.4.1).
+# The target workflow must be ONLINE before a schedule can be created.
 ds-cli schedule create \
+  --project-code <project-code> \
   --workflow-code <workflow-code> \
   --crontab "0 0 2 * * ? *" \
   --start-time "2026-01-01 00:00:00" \
@@ -275,6 +282,9 @@ ds-cli schedule create \
   --environment-code <env-code> \
   --warning-type FAILURE \
   --warning-group-id <alert-group-id>
+# get resolves a single schedule by paging the project list and filtering locally (no single-get in 3.4.1):
+ds-cli schedule get <schedule-id> --project-code <project-code>
+ds-cli schedule delete <schedule-id> --project-code <project-code>
 
 ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 \

@@ -296,17 +296,23 @@ func TestRootDoesNotExposeDeploymentLifecycleCommands(t *testing.T) {
 
 func TestProjectCreatePostsToDolphinSchedulerAPI(t *testing.T) {
 	var sawToken string
-	var sawBody map[string]any
+	// DS 3.4.1 has no /v2; project create must POST form to the legacy /projects.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/dolphinscheduler/v2/projects" {
-			t.Fatalf("path = %q", r.URL.Path)
+		if r.URL.Path != "/dolphinscheduler/projects" {
+			t.Fatalf("path = %q, want /dolphinscheduler/projects (not /v2)", r.URL.Path)
 		}
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q", r.Method)
 		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+			t.Fatalf("content-type = %q, want form", ct)
+		}
 		sawToken = r.Header.Get("token")
-		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
+		if err := r.ParseForm(); err != nil {
 			t.Fatal(err)
+		}
+		if r.PostFormValue("projectName") != "demo" || r.PostFormValue("description") != "created by test" {
+			t.Fatalf("unexpected form: projectName=%q description=%q", r.PostFormValue("projectName"), r.PostFormValue("description"))
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 0,
@@ -324,9 +330,6 @@ func TestProjectCreatePostsToDolphinSchedulerAPI(t *testing.T) {
 	}
 	if sawToken != "token-xyz" {
 		t.Fatalf("token header = %q", sawToken)
-	}
-	if sawBody["projectName"] != "demo" || sawBody["description"] != "created by test" {
-		t.Fatalf("unexpected body: %#v", sawBody)
 	}
 	if !strings.Contains(out, `"command": "project.create"`) || !strings.Contains(out, `"ok": true`) {
 		t.Fatalf("unexpected stdout:\n%s", out)
@@ -714,6 +717,7 @@ func TestScheduleCreateRequiresEnvironmentCode(t *testing.T) {
 	t.Setenv("DSCLI_API_URL", "https://example.com/dolphinscheduler")
 	t.Setenv("DSCLI_TOKEN", "tok")
 	_, err := executeRoot(t, "schedule", "create",
+		"--project-code", "42",
 		"--workflow-code", "999",
 		"--crontab", "0 0 3 * * ? *",
 		"--start-time", "2026-01-01 00:00:00",
@@ -724,6 +728,142 @@ func TestScheduleCreateRequiresEnvironmentCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--environment-code is required") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestScheduleCreateRequiresProjectCode(t *testing.T) {
+	t.Setenv("DSCLI_API_URL", "https://example.com/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	_, err := executeRoot(t, "schedule", "create",
+		"--workflow-code", "999",
+		"--crontab", "0 0 3 * * ? *",
+		"--start-time", "2026-01-01 00:00:00",
+		"--end-time", "2099-01-01 00:00:00",
+		"--environment-code", "5",
+	)
+	if err == nil {
+		t.Fatal("schedule create without --project-code should fail")
+	}
+	if !strings.Contains(err.Error(), "--project-code is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestScheduleCreatePostsPackedScheduleToLegacyEndpoint(t *testing.T) {
+	var sawPath, sawSchedule, sawWorkflow string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		sawSchedule = r.PostFormValue("schedule")
+		sawWorkflow = r.PostFormValue("workflowDefinitionCode")
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{"id": 7}})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	out, err := executeRoot(t, "schedule", "create",
+		"--project-code", "42",
+		"--workflow-code", "999",
+		"--crontab", "0 0 3 * * ? *",
+		"--start-time", "2026-01-01 00:00:00",
+		"--end-time", "2099-01-01 00:00:00",
+		"--environment-code", "5",
+		"--timezone", "UTC",
+	)
+	if err != nil {
+		t.Fatalf("schedule create: %v", err)
+	}
+	if sawPath != "/dolphinscheduler/projects/42/schedules" {
+		t.Fatalf("path = %q, want /dolphinscheduler/projects/42/schedules", sawPath)
+	}
+	if sawWorkflow != "999" {
+		t.Fatalf("workflowDefinitionCode = %q", sawWorkflow)
+	}
+	// schedule must be a packed JSON string with crontab + timezoneId.
+	var packed map[string]string
+	if err := json.Unmarshal([]byte(sawSchedule), &packed); err != nil {
+		t.Fatalf("schedule param is not JSON: %q (%v)", sawSchedule, err)
+	}
+	if packed["crontab"] != "0 0 3 * * ? *" || packed["timezoneId"] != "UTC" ||
+		packed["startTime"] != "2026-01-01 00:00:00" || packed["endTime"] != "2099-01-01 00:00:00" {
+		t.Fatalf("packed schedule unexpected: %#v", packed)
+	}
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("unexpected stdout:\n%s", out)
+	}
+}
+
+func TestScheduleGetFiltersListById(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dolphinscheduler/projects/42/schedules" {
+			t.Fatalf("path = %q, want paginated list", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "msg": "success",
+			"data": map[string]any{
+				"total": 2,
+				"totalList": []map[string]any{
+					{"id": 5, "crontab": "a"},
+					{"id": 7, "crontab": "b"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	out, err := executeRoot(t, "schedule", "get", "7", "--project-code", "42")
+	if err != nil {
+		t.Fatalf("schedule get: %v", err)
+	}
+	if !strings.Contains(out, `"id": 7`) || !strings.Contains(out, `"crontab": "b"`) {
+		t.Fatalf("schedule get should return matched entry:\n%s", out)
+	}
+
+	// Missing id -> clear not-found error.
+	_, err = executeRoot(t, "schedule", "get", "999", "--project-code", "42")
+	if err == nil {
+		t.Fatal("schedule get for missing id should error")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestScheduleGetRequiresProjectCode(t *testing.T) {
+	t.Setenv("DSCLI_API_URL", "https://example.com/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	if _, err := executeRoot(t, "schedule", "get", "7"); err == nil {
+		t.Fatal("schedule get without --project-code should fail")
+	}
+}
+
+func TestScheduleDeleteUsesLegacyProjectEndpoint(t *testing.T) {
+	var sawPath, sawMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		sawMethod = r.Method
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": true})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	if _, err := executeRoot(t, "schedule", "delete", "7"); err == nil {
+		t.Fatal("schedule delete without --project-code should fail")
+	}
+	if _, err := executeRoot(t, "schedule", "delete", "7", "--project-code", "42"); err != nil {
+		t.Fatalf("schedule delete: %v", err)
+	}
+	if sawMethod != http.MethodDelete || sawPath != "/dolphinscheduler/projects/42/schedules/7" {
+		t.Fatalf("delete hit %s %s, want DELETE /dolphinscheduler/projects/42/schedules/7", sawMethod, sawPath)
 	}
 }
 
@@ -915,5 +1055,94 @@ func TestTaskDeleteUsesLegacyProjectEndpoint(t *testing.T) {
 	}
 	if sawPath != "/dolphinscheduler/projects/42/workflow-definition/555" {
 		t.Fatalf("task delete hit %s, want /dolphinscheduler/projects/42/workflow-definition/555", sawPath)
+	}
+}
+
+func TestWorkflowCreateErrorsWithoutRequest(t *testing.T) {
+	var hit bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success"})
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	out, err := executeRoot(t, "workflow", "create", "foo", "--project-code", "42")
+	if err == nil {
+		t.Fatal("workflow create should error on 3.4.1 (no empty workflow)")
+	}
+	if hit {
+		t.Fatal("workflow create must NOT make any HTTP request")
+	}
+	if !strings.Contains(out, "create-dag") || !strings.Contains(out, `"ok": false`) {
+		t.Fatalf("error should guide to create-dag:\n%s", out)
+	}
+}
+
+func TestWorkflowUpdateUsesLegacyEndpointAndPreservesTasks(t *testing.T) {
+	var getHit, putHit bool
+	var putForm url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/dolphinscheduler/projects/42/workflow-definition/999":
+			getHit = true
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{
+					"workflowDefinition": map[string]any{
+						"name": "wf", "description": "old", "releaseState": "OFFLINE",
+						"globalParams": "[]", "executionType": "PARALLEL", "locations": "[]", "timeout": 0,
+					},
+					"taskDefinitionList": []map[string]any{
+						{"code": 111, "name": "t1", "taskType": "SHELL",
+							"taskParams": map[string]any{"rawScript": "echo hi"}},
+					},
+					"workflowTaskRelationList": []map[string]any{
+						{"preTaskCode": 0, "postTaskCode": 111},
+					},
+				},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/dolphinscheduler/projects/42/workflow-definition/999":
+			putHit = true
+			_ = r.ParseForm()
+			putForm = r.PostForm
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{"version": 2}})
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+
+	out, err := executeRoot(t, "workflow", "update", "999", "--project-code", "42", "--description", "new")
+	if err != nil {
+		t.Fatalf("workflow update: %v", err)
+	}
+	if !getHit || !putHit {
+		t.Fatalf("update must GET then PUT (get=%v put=%v)", getHit, putHit)
+	}
+	// Description overlaid, name preserved, tasks/relations preserved (non-empty).
+	if putForm.Get("description") != "new" {
+		t.Fatalf("description = %q, want new", putForm.Get("description"))
+	}
+	if putForm.Get("name") != "wf" {
+		t.Fatalf("name = %q, want preserved wf", putForm.Get("name"))
+	}
+	var tasks []map[string]any
+	if err := json.Unmarshal([]byte(putForm.Get("taskDefinitionJson")), &tasks); err != nil || len(tasks) != 1 {
+		t.Fatalf("taskDefinitionJson must preserve 1 task: %q", putForm.Get("taskDefinitionJson"))
+	}
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("unexpected stdout:\n%s", out)
+	}
+}
+
+func TestWorkflowUpdateRequiresProjectCode(t *testing.T) {
+	t.Setenv("DSCLI_API_URL", "https://example.com/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	if _, err := executeRoot(t, "workflow", "update", "999", "--description", "x"); err == nil {
+		t.Fatal("workflow update without --project-code should fail")
 	}
 }

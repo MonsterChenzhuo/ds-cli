@@ -31,9 +31,12 @@ func newProjectCreateCmd(flags *apiFlags) *cobra.Command {
 		Short: "Create a DolphinScheduler project.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body := map[string]any{"projectName": args[0], "description": description}
+			// DS 3.4.1 has no /v2 controllers; use the legacy form endpoint.
 			return apiRun(cmd, *flags, "project.create", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodPost, "/v2/projects", body)
+				return client.Form(ctx, http.MethodPost, "/projects", formValues(
+					"projectName", args[0],
+					"description", description,
+				))
 			})
 		},
 	}
@@ -74,7 +77,7 @@ func newProjectGetCmd(flags *apiFlags) *cobra.Command {
 				return err
 			}
 			return apiRun(cmd, *flags, "project.get", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodGet, fmt.Sprintf("/v2/projects/%d", code), nil)
+				return client.JSON(ctx, http.MethodGet, fmt.Sprintf("/projects/%d", code), nil)
 			})
 		},
 	}
@@ -91,7 +94,7 @@ func newProjectDeleteCmd(flags *apiFlags) *cobra.Command {
 				return err
 			}
 			return apiRun(cmd, *flags, "project.delete", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodDelete, fmt.Sprintf("/v2/projects/%d", code), nil)
+				return client.JSON(ctx, http.MethodDelete, fmt.Sprintf("/projects/%d", code), nil)
 			})
 		},
 	}

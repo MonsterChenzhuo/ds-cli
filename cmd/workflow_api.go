@@ -45,34 +45,26 @@ func newWorkflowCreateCmd(flags *apiFlags) *cobra.Command {
 	var warningGroupID, timeout int
 	c := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Create an empty workflow definition.",
-		Args:  cobra.ExactArgs(1),
+		Short: "Deprecated: DS 3.4.1 cannot create an empty workflow (use create-dag or task create).",
+		Long: "DS 3.4.1 has no /v2 API and its legacy workflow-definition endpoint requires a\n" +
+			"non-empty definition (at least one task + one relation), so an empty workflow\n" +
+			"cannot be created. Use `workflow create-dag` for a multi-task DAG, or\n" +
+			"`task create` for a single-task workflow.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if projectCode == 0 {
-				return fmt.Errorf("--project-code is required")
-			}
-			gp, err := resolveGlobalParams(globalParams, globalParamsFile)
-			if err != nil {
-				return err
-			}
-			if gp == "" {
-				gp = "[]"
-			}
-			body := map[string]any{
-				"name":           args[0],
-				"description":    description,
-				"projectCode":    projectCode,
-				"releaseState":   releaseState,
-				"globalParams":   gp,
-				"warningGroupId": warningGroupID,
-				"timeout":        timeout,
-				"executionType":  executionType,
-			}
-			return apiRun(cmd, *flags, "workflow.create", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodPost, "/v2/workflows", body)
-			})
+			// Fail locally without any request: 3.4.1 offers no way to create an empty workflow.
+			err := fmt.Errorf("DS 3.4.1 cannot create an empty workflow; use `ds-cli workflow create-dag --file <dag.json>` for a multi-task DAG, or `ds-cli task create` for a single-task workflow")
+			writeAPIError(cmd, "workflow.create", "CONFIG_ERROR", err)
+			return err
 		},
 	}
+	// Flags kept for backward-compatible invocation shape; unused now that create errors out.
+	_ = releaseState
+	_ = globalParams
+	_ = globalParamsFile
+	_ = executionType
+	_ = warningGroupID
+	_ = timeout
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
 	c.Flags().StringVar(&description, "description", "", "Workflow description")
 	c.Flags().StringVar(&releaseState, "release-state", "OFFLINE", "Release state: ONLINE or OFFLINE")
@@ -281,12 +273,19 @@ func newWorkflowCreateDagCmd(flags *apiFlags) *cobra.Command {
 func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
 	var name, description, releaseState, globalParams, globalParamsFile, executionType, location string
-	var warningGroupID, timeout int
+	var timeout int
 	c := &cobra.Command{
 		Use:   "update <workflow-code>",
 		Short: "Update workflow definition metadata.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Update workflow-level metadata (name/description/globalParams/executionType/location/\n" +
+			"timeout/release-state). DS 3.4.1 has no /v2 API and its legacy update requires the FULL\n" +
+			"definition, so this fetches the current definition, preserves its tasks/relations verbatim,\n" +
+			"overlays only the flags you set, and PUTs it back. Only the flags you pass are changed.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectCode == 0 {
+				return fmt.Errorf("--project-code is required")
+			}
 			code, err := int64Arg(args[0], "workflow-code")
 			if err != nil {
 				return err
@@ -295,47 +294,54 @@ func newWorkflowUpdateCmd(flags *apiFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			body := map[string]any{}
-			if name != "" {
-				body["name"] = name
+			// Only overlay fields the user actually set (cobra Changed), so unset
+			// flags leave the existing value untouched rather than blanking it.
+			changes := dsapi.WorkflowMetaChanges{}
+			if cmd.Flags().Changed("name") {
+				changes.Name = &name
 			}
-			if description != "" {
-				body["description"] = description
+			if cmd.Flags().Changed("description") {
+				changes.Description = &description
 			}
-			if releaseState != "" {
-				body["releaseState"] = releaseState
+			if cmd.Flags().Changed("global-params") || cmd.Flags().Changed("global-params-file") {
+				changes.GlobalParams = &gp
 			}
-			if gp != "" {
-				body["globalParams"] = gp
+			if cmd.Flags().Changed("execution-type") {
+				changes.ExecutionType = &executionType
 			}
-			if executionType != "" {
-				body["executionType"] = executionType
+			if cmd.Flags().Changed("location") {
+				changes.Locations = &location
 			}
-			if location != "" {
-				body["location"] = location
+			if cmd.Flags().Changed("release-state") {
+				changes.ReleaseState = &releaseState
 			}
-			if warningGroupID != 0 {
-				body["warningGroupId"] = warningGroupID
+			if cmd.Flags().Changed("timeout") {
+				changes.Timeout = &timeout
 			}
-			if timeout != 0 {
-				body["timeout"] = timeout
+
+			client, profile, err := apiClient(*flags)
+			if err != nil {
+				writeAPIError(cmd, "workflow.update", "CONFIG_ERROR", err)
+				return err
 			}
-			return apiRun(cmd, *flags, "workflow.update", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.JSON(ctx, http.MethodPut, fmt.Sprintf("/v2/workflows/%d", code), body)
-			})
+			ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+			defer cancel()
+			resp, err := dsapi.UpdateWorkflowMeta(ctx, client, projectCode, code, changes)
+			if err != nil {
+				writeAPIError(cmd, "workflow.update", "DS_API_ERROR", err)
+				return err
+			}
+			return writeAPIResponse(cmd, "workflow.update", profile, resp)
 		},
 	}
-	// Accepted for consistency with other workflow subcommands; the update API
-	// addresses the workflow by code alone, so this value is not required.
-	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code (accepted for consistency; not required by the update API)")
+	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code (required)")
 	c.Flags().StringVar(&name, "name", "", "Workflow name")
 	c.Flags().StringVar(&description, "description", "", "Workflow description")
-	c.Flags().StringVar(&releaseState, "release-state", "", "Release state")
+	c.Flags().StringVar(&releaseState, "release-state", "", "Release state: ONLINE or OFFLINE")
 	c.Flags().StringVar(&globalParams, "global-params", "", "Global params JSON")
 	c.Flags().StringVar(&globalParamsFile, "global-params-file", "", "Read global params JSON from file (use for DS time placeholders like $[yyyy-MM-dd-1])")
 	c.Flags().StringVar(&executionType, "execution-type", "", "Execution type")
 	c.Flags().StringVar(&location, "location", "", "Location JSON")
-	c.Flags().IntVar(&warningGroupID, "warning-group-id", 0, "Warning group ID")
 	c.Flags().IntVar(&timeout, "timeout", 0, "Workflow timeout minutes")
 	return c
 }

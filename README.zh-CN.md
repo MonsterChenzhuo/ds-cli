@@ -173,15 +173,17 @@ ds-cli task create rewrite_index \
   --global-params-file ./global_params.json
 ```
 
-> **`$[...]` 时间占位符的坑**：DS 内置时间变量形如 `$[yyyy-MM-dd-1]`，而 `$[...]` 正好是 bash/zsh 的算术展开语法，直接写进 `--global-params '...'` 会被 shell 吞掉、破坏 JSON。凡是全局参数里含 `$[...]`，一律用 `--global-params-file <file>` 从文件读取来绕开 shell 转义。`task create`、`workflow create`、`workflow update` 都支持 `--global-params` 与 `--global-params-file`（二者互斥），并会在本地校验 JSON。
+> **`$[...]` 时间占位符的坑**：DS 内置时间变量形如 `$[yyyy-MM-dd-1]`，而 `$[...]` 正好是 bash/zsh 的算术展开语法，直接写进 `--global-params '...'` 会被 shell 吞掉、破坏 JSON。凡是全局参数里含 `$[...]`，一律用 `--global-params-file <file>` 从文件读取来绕开 shell 转义。`task create`、`workflow create-dag`、`workflow update` 都支持 `--global-params`/`--global-params-file`（二者互斥），并会在本地校验 JSON。
+
+> **DS 3.4.1 端点规则**：该 DS 版本**没有 `/v2` open-api controller**，ds-cli 统一走项目内旧端点。因此 `workflow get/delete/update`、`task get/delete`、`schedule create/update/get/delete` **都需要 `--project-code`**。3.4.1 无单条 schedule 查询接口——`schedule get` 会分页拉取项目调度列表并在本地按 id 过滤。此外 3.4.1 无法创建空 workflow（`workflow create` 会直接报错并提示改用 `create-dag`/`task create`）。
 
 需要直接管理普通工作流定义时，使用 `workflow`：
 
 ```bash
-ds-cli workflow create daily_job --project-code <project-code>
-ds-cli workflow update <workflow-code> --name daily_job_v2
-# update 也接受 --project-code（与其他子命令保持一致，update 本身按 code 定位，不强制）
-ds-cli workflow update <workflow-code> --global-params-file ./global_params.json --release-state ONLINE
+# 注意：DS 3.4.1 无法创建空 workflow（旧端点要求至少一个 task）。多任务用 create-dag，单任务用 task create。
+ds-cli workflow update <workflow-code> --project-code <project-code> --name daily_job_v2
+# update 需要 --project-code；会拉取完整定义、保留 task/关系，只覆盖你传的字段：
+ds-cli workflow update <workflow-code> --project-code <project-code> --global-params-file ./global_params.json --release-state ONLINE
 ds-cli workflow list --project-code <project-code>
 
 # 读取一个工作流及其所有 task 定义和上下游关系：
@@ -265,7 +267,10 @@ ds-cli task-def update <task-code> --project-code <project-code> --raw-script-fi
 ### 调度、告警和环境
 
 ```bash
+# schedule create/update/get/delete 都需要 --project-code（3.4.1 按项目路径定位）。
+# 建调度前目标 workflow 必须已 ONLINE。
 ds-cli schedule create \
+  --project-code <project-code> \
   --workflow-code <workflow-code> \
   --crontab "0 0 2 * * ? *" \
   --start-time "2026-01-01 00:00:00" \
@@ -274,6 +279,9 @@ ds-cli schedule create \
   --environment-code <env-code> \
   --warning-type FAILURE \
   --warning-group-id <alert-group-id>
+# get 通过分页列表 + 本地按 id 过滤解析单条（3.4.1 无单条查询接口）：
+ds-cli schedule get <schedule-id> --project-code <project-code>
+ds-cli schedule delete <schedule-id> --project-code <project-code>
 
 ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 \
