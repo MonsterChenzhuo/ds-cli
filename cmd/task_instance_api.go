@@ -139,7 +139,7 @@ func newTaskInstanceStopCmd(flags *apiFlags) *cobra.Command {
 }
 
 func newTaskInstanceLogCmd(flags *apiFlags) *cobra.Command {
-	var skipLineNum, limit int
+	var skipLineNum, limit, tail int
 	var full, clean bool
 	var outputPath string
 	c := &cobra.Command{
@@ -148,14 +148,24 @@ func newTaskInstanceLogCmd(flags *apiFlags) *cobra.Command {
 		Long: "log fetches a task instance's log via /log/detail.\n\n" +
 			"By default it returns a single page of up to --limit lines starting at --skip-line-num.\n" +
 			"--full loops over the pages until the whole log is fetched, so an agent never\n" +
-			"silently truncates a long log. --output FILE writes the log to disk and prints only\n" +
-			"a JSON envelope summary (path/bytes/lines). --clean strips the DolphinScheduler\n" +
-			"per-line prefix (timestamp + 'INFO  -  -> ') to leave readable text; off by default.",
+			"silently truncates a long log. --tail N returns only the last N lines (fetched via\n" +
+			"/log/download-log, since /log/detail cannot seek to the end). --output FILE writes the\n" +
+			"log to disk and prints only a JSON envelope summary (path/bytes/lines). --clean strips\n" +
+			"the DolphinScheduler per-line prefix (timestamp + 'INFO  -  -> ') to leave readable text.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := intArg(args[0], "task-instance-id")
 			if err != nil {
 				return err
+			}
+			if tail != 0 && full {
+				return fmt.Errorf("--tail and --full are mutually exclusive")
+			}
+			if tail < 0 {
+				return fmt.Errorf("--tail must be >= 0")
+			}
+			if tail > 0 {
+				return runTaskLogTail(cmd, *flags, id, tail, clean, outputPath)
 			}
 			// Single-page mode without output/clean keeps the original envelope passthrough.
 			if !full && outputPath == "" && !clean {
@@ -214,7 +224,70 @@ func newTaskInstanceLogCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().BoolVar(&full, "full", false, "Fetch the whole log by paging until exhausted")
 	c.Flags().StringVar(&outputPath, "output", "", "Write the log to this file; stdout then gets only an envelope summary")
 	c.Flags().BoolVar(&clean, "clean", false, "Strip the DolphinScheduler per-line prefix to leave readable text")
+	c.Flags().IntVar(&tail, "tail", 0, "Return only the last N lines (uses /log/download-log)")
 	return c
+}
+
+// runTaskLogTail returns the last n lines of a task instance's log. The
+// /log/detail endpoint can only page forward from the top, so the log file is
+// downloaded once and sliced locally.
+func runTaskLogTail(cmd *cobra.Command, flags apiFlags, id, n int, clean bool, outputPath string) error {
+	client, profile, err := apiClient(flags)
+	if err != nil {
+		writeAPIError(cmd, "task-instance.log", "CONFIG_ERROR", err)
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+	defer cancel()
+	resp, err := client.RawGet(ctx, "/log/download-log", formValues("taskInstanceId", strconv.Itoa(id)))
+	if err != nil {
+		writeAPIError(cmd, "task-instance.log", "DS_API_ERROR", err)
+		return err
+	}
+	if looksLikeJSONError(resp.Body) {
+		writeAPIError(cmd, "task-instance.log", "DS_API_ERROR",
+			fmt.Errorf("download-log returned a JSON error instead of log bytes: %s", trimForError(resp.Body)))
+		return fmt.Errorf("log tail failed")
+	}
+	lines := strings.Split(strings.ReplaceAll(string(resp.Body), "\r\n", "\n"), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	total := len(lines)
+	if total > n {
+		lines = lines[total-n:]
+	}
+	message := strings.Join(lines, "\n")
+	if clean {
+		message = cleanDSLog(message)
+	}
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, []byte(message), 0o644); err != nil {
+			writeAPIError(cmd, "task-instance.log", "IO_ERROR", err)
+			return err
+		}
+		e := output.NewEnvelope("task-instance.log")
+		e.Summary = map[string]any{"cluster": profile.Name, "api_url": profile.APIURL}
+		e.Data = map[string]any{
+			"output_path": outputPath,
+			"bytes":       len(message),
+			"lines":       len(lines),
+			"total_lines": total,
+			"tail":        n,
+			"clean":       clean,
+		}
+		return e.Write(cmd.OutOrStdout())
+	}
+	e := output.NewEnvelope("task-instance.log")
+	e.Summary = map[string]any{"cluster": profile.Name, "api_url": profile.APIURL}
+	e.Data = map[string]any{
+		"message":     message,
+		"lines":       len(lines),
+		"total_lines": total,
+		"tail":        n,
+		"clean":       clean,
+	}
+	return e.Write(cmd.OutOrStdout())
 }
 
 // taskLogPage is the data payload of /log/detail.

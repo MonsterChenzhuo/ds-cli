@@ -129,8 +129,8 @@ ds-cli project list
 | `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | 管理工作流定义；`get-detail` 一次返回工作流 + 全部 task + 关系（`--summary` 给不含 rawScript 的精简 task 列表） |
 | `ds-cli workflow create-dag` | 用一个 JSON 文件一次创建带依赖的多任务工作流（DAG），自动批量生成 task code |
 | `ds-cli workflow patch-task` | 替换多任务工作流中某个 task 的 `rawScript`（自动 offline → 更新 → 恢复 release 状态） |
-| `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流 |
-| `ds-cli workflow-instance list/get/tasks/control/delete` | 查询和控制工作流实例（`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`） |
+| `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流，也支持显式日期列表/日期范围补数 |
+| `ds-cli workflow-instance list/backfill-status/get/tasks/control/delete` | 查询、核对和控制工作流实例；`backfill-status` 检查补数日期是否漏跑 |
 | `ds-cli task-instance list/log/log-download/force-success/stop` | 查询任务实例并拉取 worker 日志（`log --full` 取全量日志，`log-download` 直接落盘） |
 | `ds-cli task-def get/update` | 按 code 单独读取或更新一个任务定义（使用 `with-upstream` 接口） |
 | `ds-cli task create/online/offline/delete/get/list` | 创建和操作单任务工作流 |
@@ -204,6 +204,23 @@ ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
 ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
+
+# 补数：日期列表支持逗号/换行分隔，日期范围按工作流 cron 计算（结束日期包含）
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --exec-type COMPLEMENT_DATA \
+  --complement-date-list-file ./dates.txt \
+  --complement-time "03:00:00" \
+  --run-mode RUN_MODE_PARALLEL \
+  --expected-parallelism 10
+
+# 核对一批补数实际执行的日期；跨天派生的补数要传完整的启动日期集合
+ds-cli workflow-instance backfill-status \
+  --project-code <project-code> \
+  --workflow-code <workflow-code> \
+  --start-date 2025-01-01 \
+  --end-date 2026-09-20 \
+  --started-on 2026-09-21,2026-09-22
 ```
 
 #### 用 `workflow create-dag` 创建多任务 DAG
@@ -251,6 +268,8 @@ ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 # 取全量日志落盘（不会静默截断），stdout 只给摘要；--clean 去掉 DS 行前缀：
 ds-cli task-instance log <task-instance-id> --full --output ./ti.log
 ds-cli task-instance log <task-instance-id> --full --clean --output ./ti.clean.log
+# 只看日志末尾 N 行；适合检查仍在运行的长任务
+ds-cli task-instance log <task-instance-id> --tail 100 --clean
 # 走 /log/download-log 下载整份日志；不带 --output 默认落 <临时目录>/ds-cli/<id>.log，stdout 只给摘要：
 ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log

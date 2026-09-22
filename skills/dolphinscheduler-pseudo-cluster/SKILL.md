@@ -53,7 +53,7 @@ ds-cli project list
 2. 需要创建项目时执行 `ds-cli project create <name>`。
 3. agent 生成单脚本任务时，优先执行 `ds-cli task create`，再根据需要 `task online`。
 4. 已有复杂工作流时，使用 `workflow` 命令直接管理工作流定义；用 `workflow get-detail` 读完整结构（含 task + 关系），用 `workflow patch-task` 改某个 task 的 rawScript，用 `workflow start` 立即触发一次。需要新建带依赖的多任务 DAG 时用 `workflow create-dag --file dag.json`（一个 JSON 描述整图，自动批量生成 task code、解析依赖、可选上线），不要手拼 taskDefinitionJson。
-5. 任务跑起来后用 `workflow-instance list/get/control` 跟实例状态，用 `task-instance list/log/log-download` 拉日志，用 `task-instance force-success/stop` 处置异常。
+5. 任务跑起来后用 `workflow-instance list/get/control` 跟实例状态；补数必须用 `workflow-instance backfill-status` 按日期范围核对实际执行和漏天。用 `task-instance list/log/log-download` 拉日志，`log --tail N --clean` 查看长日志末尾，用 `task-instance force-success/stop` 处置异常。
 6. 需要按 task code 操作时用 `task-def get/update`。
 7. 需要定时运行时，使用 `schedule create`（默认 timezone=UTC，必须传 `--environment-code` 和 `--project-code`；目标 workflow 需先 ONLINE）。DS 3.4.1 无 `/v2` open-api：`workflow get/delete/update`、`task get/delete`、`schedule create/update/get/delete` 都要带 `--project-code`；`workflow create`（空 workflow）无法创建，请改用 `workflow create-dag` 或 `task create`。
 8. 告警组使用 `alert group`，运行环境使用 `environment`。
@@ -88,12 +88,28 @@ ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
 
+# 显式日期补数（dates.txt 可用逗号或换行分隔）
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --exec-type COMPLEMENT_DATA \
+  --complement-date-list-file ./dates.txt \
+  --complement-time "03:00:00" \
+  --run-mode RUN_MODE_PARALLEL \
+  --expected-parallelism 10
+
+# 检查补数范围是否漏天；跨日派生实例时传全部启动日期
+ds-cli workflow-instance backfill-status \
+  --project-code <project-code> --workflow-code <workflow-code> \
+  --start-date 2025-01-01 --end-date 2026-09-20 \
+  --started-on 2026-09-21,2026-09-22
+
 # 实例与日志
 ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
+ds-cli task-instance log <task-instance-id> --tail 100 --clean
 
 # 按 task code 单独读/写
 ds-cli task-def get <task-code> --project-code <project-code>

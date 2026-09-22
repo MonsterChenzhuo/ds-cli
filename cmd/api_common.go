@@ -157,3 +157,87 @@ func releaseWorkflow(ctx context.Context, client *dsapi.Client, projectCode, cod
 		formValues("releaseState", state),
 	)
 }
+
+// splitDateList splits a comma/semicolon/newline separated date list. Plain
+// spaces are NOT separators so that "2025-01-02 03:00:00" stays one entry.
+func splitDateList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// buildComplementScheduleTime assembles the DS `scheduleTime` JSON that the
+// start-workflow-instance endpoint expects for execType=COMPLEMENT_DATA. DS
+// accepts either a date range (it derives fire times from the workflow's cron)
+// or an explicit schedule-date list (used verbatim).
+func buildComplementScheduleTime(dateList, dateListFile, startDate, endDate, defaultTime string) (string, error) {
+	entries := splitDateList(dateList)
+	if dateListFile != "" {
+		if dateList != "" {
+			return "", fmt.Errorf("--complement-date-list and --complement-date-list-file are mutually exclusive")
+		}
+		b, err := os.ReadFile(dateListFile)
+		if err != nil {
+			return "", fmt.Errorf("read --complement-date-list-file: %w", err)
+		}
+		entries = splitDateList(string(b))
+	}
+	if len(entries) > 0 && (startDate != "" || endDate != "") {
+		return "", fmt.Errorf("--complement-date-list/--complement-date-list-file and --complement-start-date/--complement-end-date are mutually exclusive")
+	}
+	if startDate != "" || endDate != "" {
+		if startDate == "" || endDate == "" {
+			return "", fmt.Errorf("--complement-start-date and --complement-end-date must be provided together")
+		}
+		if dsapi.NormalizeDate(startDate) == "" || dsapi.NormalizeDate(endDate) == "" {
+			return "", fmt.Errorf("invalid complement date range %q..%q: expect yyyy-MM-dd or yyyy-MM-dd HH:mm:ss", startDate, endDate)
+		}
+		if _, err := dsapi.DateRange(startDate, endDate); err != nil {
+			return "", err
+		}
+		payload := map[string]string{
+			"complementStartDate": withDefaultTime(startDate, "00:00:00"),
+			"complementEndDate":   withDefaultTime(endDate, "00:00:00"),
+		}
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("complement needs --complement-date-list, --complement-date-list-file or --complement-start-date/--complement-end-date")
+	}
+	if defaultTime == "" {
+		defaultTime = "00:00:00"
+	}
+	normalised := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if dsapi.NormalizeDate(e) == "" {
+			return "", fmt.Errorf("invalid date %q: expect yyyy-MM-dd or yyyy-MM-dd HH:mm:ss", e)
+		}
+		normalised = append(normalised, withDefaultTime(e, defaultTime))
+	}
+	payload := map[string]string{"complementScheduleDateList": strings.Join(normalised, ",")}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// withDefaultTime appends " HH:MM:SS" to a date-only value.
+func withDefaultTime(v, t string) string {
+	v = strings.TrimSpace(v)
+	if strings.Contains(v, " ") {
+		return v
+	}
+	return v + " " + t
+}

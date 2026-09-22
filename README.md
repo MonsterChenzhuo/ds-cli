@@ -129,8 +129,8 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 | `ds-cli workflow create/update/get/get-detail/list/online/offline/delete` | Manage workflow definitions; `get-detail` includes tasks + relations (`--summary` for a compact task list without rawScript) |
 | `ds-cli workflow create-dag` | Create a whole multi-task workflow (DAG with dependencies) from one JSON file, batch-generating task codes |
 | `ds-cli workflow patch-task` | Swap one task's `rawScript` in a multi-task workflow (offline → update → restore release state) |
-| `ds-cli workflow start` | Trigger one workflow run via `/executors/start-workflow-instance` |
-| `ds-cli workflow-instance list/get/tasks/control/delete` | Inspect and control workflow instances (`control --type STOP\|PAUSE\|RESUME\|RERUN\|RECOVER-FAILED`) |
+| `ds-cli workflow start` | Trigger one workflow run or a date-list/date-range backfill via `/executors/start-workflow-instance` |
+| `ds-cli workflow-instance list/backfill-status/get/tasks/control/delete` | Inspect, validate backfill coverage, and control workflow instances |
 | `ds-cli task-instance list/log/log-download/force-success/stop` | Inspect task instances and pull worker logs (`log --full` for the whole log, `log-download` saves to a file) |
 | `ds-cli task-def get/update` | Read or update a single task definition by code (uses `with-upstream`) |
 | `ds-cli task create/online/offline/delete/get/list` | Create and operate single-task workflows |
@@ -207,6 +207,22 @@ ds-cli workflow create-dag --project-code <project-code> --file ./dag.json
 ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
+
+# Backfill an explicit list (dates.txt may be comma/newline separated)
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --exec-type COMPLEMENT_DATA \
+  --complement-date-list-file ./dates.txt \
+  --complement-time "03:00:00" \
+  --run-mode RUN_MODE_PARALLEL \
+  --expected-parallelism 10
+
+# Verify every expected day was actually executed
+ds-cli workflow-instance backfill-status \
+  --project-code <project-code> \
+  --workflow-code <workflow-code> \
+  --start-date 2025-01-01 --end-date 2026-09-20 \
+  --started-on 2026-09-21,2026-09-22
 ```
 
 #### Multi-task DAGs with `workflow create-dag`
@@ -254,6 +270,8 @@ ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 # Whole log to a file, never silently truncated; stdout is only a summary. --clean strips DS prefixes:
 ds-cli task-instance log <task-instance-id> --full --output ./ti.log
 ds-cli task-instance log <task-instance-id> --full --clean --output ./ti.clean.log
+# Read only the last N lines of a long log
+ds-cli task-instance log <task-instance-id> --tail 100 --clean
 # Download the whole log via /log/download-log; defaults to <tmpdir>/ds-cli/<id>.log, stdout is a summary:
 ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log

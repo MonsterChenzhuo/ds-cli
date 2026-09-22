@@ -375,19 +375,102 @@ func newWorkflowGetCmd(flags *apiFlags) *cobra.Command {
 
 func newWorkflowListCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
+	var name string
+	var compact bool
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List workflow definitions in a project.",
+		Long: "list returns every workflow definition with its full task list (large).\n" +
+			"--compact projects each entry to code/name/releaseState/version/executionType/taskCount\n" +
+			"plus update time, which is what an agent usually needs to pick a workflow code.\n" +
+			"--name filters by case-insensitive substring on the workflow name.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectCode == 0 {
 				return fmt.Errorf("--project-code is required")
 			}
-			return apiRun(cmd, *flags, "workflow.list", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.Form(ctx, http.MethodGet, fmt.Sprintf("/projects/%d/workflow-definition/list", projectCode), nil)
-			})
+			if !compact && name == "" {
+				return apiRun(cmd, *flags, "workflow.list", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
+					return client.Form(ctx, http.MethodGet, fmt.Sprintf("/projects/%d/workflow-definition/list", projectCode), nil)
+				})
+			}
+			client, profile, err := apiClient(*flags)
+			if err != nil {
+				writeAPIError(cmd, "workflow.list", "CONFIG_ERROR", err)
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+			defer cancel()
+			resp, err := client.Form(ctx, http.MethodGet, fmt.Sprintf("/projects/%d/workflow-definition/list", projectCode), nil)
+			if err != nil {
+				writeAPIError(cmd, "workflow.list", "DS_API_ERROR", err)
+				return err
+			}
+			var decoded struct {
+				Data struct {
+					TotalList []struct {
+						WorkflowDefinition json.RawMessage   `json:"workflowDefinition"`
+						TaskDefinitionList []json.RawMessage `json:"taskDefinitionList"`
+					} `json:"totalList"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(resp.Body, &decoded); err != nil {
+				writeAPIError(cmd, "workflow.list", "DS_API_ERROR", fmt.Errorf("decode workflow list: %w", err))
+				return err
+			}
+			out := make([]map[string]any, 0, len(decoded.Data.TotalList))
+			for _, item := range decoded.Data.TotalList {
+				var wd struct {
+					Code          int64  `json:"code"`
+					Name          string `json:"name"`
+					Version       int    `json:"version"`
+					ReleaseState  string `json:"releaseState"`
+					ExecutionType string `json:"executionType"`
+					Description   string `json:"description"`
+					CreateTime    string `json:"createTime"`
+					UpdateTime    string `json:"updateTime"`
+				}
+				if err := json.Unmarshal(item.WorkflowDefinition, &wd); err != nil {
+					continue
+				}
+				if name != "" && !strings.Contains(strings.ToLower(wd.Name), strings.ToLower(name)) {
+					continue
+				}
+				entry := map[string]any{
+					"code":          wd.Code,
+					"name":          wd.Name,
+					"releaseState":  wd.ReleaseState,
+					"version":       wd.Version,
+					"executionType": wd.ExecutionType,
+					"taskCount":     len(item.TaskDefinitionList),
+				}
+				if compact {
+					entry["description"] = wd.Description
+					entry["createTime"] = wd.CreateTime
+					entry["updateTime"] = wd.UpdateTime
+				} else {
+					entry["workflowDefinition"] = json.RawMessage(item.WorkflowDefinition)
+					entry["taskDefinitionList"] = item.TaskDefinitionList
+				}
+				out = append(out, entry)
+			}
+			e := output.NewEnvelope("workflow.list")
+			e.Summary = map[string]any{
+				"cluster":     profile.Name,
+				"api_url":     profile.APIURL,
+				"http_status": resp.HTTPStatus,
+			}
+			e.Data = map[string]any{
+				"code":  0,
+				"msg":   "success",
+				"data":  out,
+				"total": len(out),
+			}
+			return e.Write(cmd.OutOrStdout())
 		},
 	}
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	c.Flags().StringVar(&name, "name", "", "Only show workflows whose name contains this substring")
+	c.Flags().BoolVar(&compact, "compact", false, "Drop task definitions and keep code/name/releaseState/version/taskCount")
 	return c
 }
 
@@ -634,6 +717,7 @@ func newWorkflowStartCmd(flags *apiFlags) *cobra.Command {
 	var failureStrategy, warningType, execType, taskDependType, startNodeList string
 	var runMode, instancePriority, workerGroup, tenantCode, startParams string
 	var complementDependentMode, executionOrder string
+	var complementDateList, complementDateListFile, complementStartDate, complementEndDate, complementTime string
 	var warningGroupID, expectedParallelism, dryRun int
 	var environmentCode int64
 	var allLevelDependent bool
@@ -648,6 +732,25 @@ func newWorkflowStartCmd(flags *apiFlags) *cobra.Command {
 			code, err := int64Arg(args[0], "workflow-code")
 			if err != nil {
 				return err
+			}
+			execType = strings.ToUpper(strings.TrimSpace(execType))
+			if execType != "START_PROCESS" && execType != "COMPLEMENT_DATA" {
+				return fmt.Errorf("--exec-type must be START_PROCESS or COMPLEMENT_DATA")
+			}
+			hasComplementFlags := complementDateList != "" || complementDateListFile != "" ||
+				complementStartDate != "" || complementEndDate != ""
+			if hasComplementFlags && execType != "COMPLEMENT_DATA" {
+				return fmt.Errorf("--complement-* flags require --exec-type COMPLEMENT_DATA")
+			}
+			if hasComplementFlags {
+				if scheduleTime != "" {
+					return fmt.Errorf("--schedule-time and --complement-* flags are mutually exclusive")
+				}
+				built, err := buildComplementScheduleTime(complementDateList, complementDateListFile, complementStartDate, complementEndDate, complementTime)
+				if err != nil {
+					return err
+				}
+				scheduleTime = built
 			}
 			if scheduleTime == "" {
 				scheduleTime = time.Now().UTC().Format("2006-01-02 15:04:05")
@@ -690,7 +793,12 @@ func newWorkflowStartCmd(flags *apiFlags) *cobra.Command {
 		},
 	}
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
-	c.Flags().StringVar(&scheduleTime, "schedule-time", "", "Schedule time, e.g. 2026-01-01 00:00:00 (defaults to now UTC)")
+	c.Flags().StringVar(&scheduleTime, "schedule-time", "", "Schedule time, e.g. 2026-01-01 00:00:00 (defaults to now UTC). For COMPLEMENT_DATA pass the DS JSON, or use the --complement-* flags")
+	c.Flags().StringVar(&complementDateList, "complement-date-list", "", "COMPLEMENT_DATA only: comma-separated schedule dates, e.g. 2025-01-02,2025-01-03")
+	c.Flags().StringVar(&complementDateListFile, "complement-date-list-file", "", "COMPLEMENT_DATA only: read schedule dates from a file (comma/newline separated)")
+	c.Flags().StringVar(&complementStartDate, "complement-start-date", "", "COMPLEMENT_DATA only: range start; DS derives fire times from the workflow cron")
+	c.Flags().StringVar(&complementEndDate, "complement-end-date", "", "COMPLEMENT_DATA only: range end (inclusive)")
+	c.Flags().StringVar(&complementTime, "complement-time", "00:00:00", "COMPLEMENT_DATA only: time appended to date-only entries of --complement-date-list")
 	c.Flags().StringVar(&failureStrategy, "failure-strategy", "CONTINUE", "Failure strategy: CONTINUE or END")
 	c.Flags().StringVar(&warningType, "warning-type", "NONE", "Warning type: NONE, SUCCESS, FAILURE, ALL")
 	c.Flags().StringVar(&execType, "exec-type", "START_PROCESS", "Command type: START_PROCESS or COMPLEMENT_DATA")

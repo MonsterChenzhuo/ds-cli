@@ -20,8 +20,8 @@ description: 使用 ds-cli 通过 DolphinScheduler REST API 管理已有 DS 集�
    - 普通工作流：`workflow create/update/get/get-detail/list/online/offline/delete`
    - 多任务依赖 DAG（一个 JSON 文件建整图）：`workflow create-dag`
    - 改某 task 脚本（一键 offline→update→恢复 release）：`workflow patch-task`
-   - 立即触发一次工作流：`workflow start`
-   - 工作流实例：`workflow-instance list/get/tasks/control/delete`
+   - 立即触发一次工作流或补数：`workflow start`
+   - 工作流实例：`workflow-instance list/backfill-status/get/tasks/control/delete`
    - 任务实例与日志：`task-instance list/log/log-download/force-success/stop`
    - 任务定义（按 task code）：`task-def get/update`
    - 调度：`schedule create/update/get/list/online/offline/delete`
@@ -90,12 +90,30 @@ ds-cli workflow start <workflow-code> \
   --project-code <project-code> \
   --environment-code <env-code>
 
+# 补数：显式日期列表或 --complement-start-date/--complement-end-date 二选一
+ds-cli workflow start <workflow-code> \
+  --project-code <project-code> \
+  --exec-type COMPLEMENT_DATA \
+  --complement-date-list-file ./dates.txt \
+  --complement-time "03:00:00" \
+  --run-mode RUN_MODE_PARALLEL \
+  --expected-parallelism 10
+
+# 核对补数是否漏天；--started-on 用于限定补数批次的启动日期
+ds-cli workflow-instance backfill-status \
+  --project-code <project-code> \
+  --workflow-code <workflow-code> \
+  --start-date 2025-01-01 --end-date 2026-09-20 \
+  --started-on 2026-09-21,2026-09-22
+
 # 查实例、控制实例、查任务、拉日志
 ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
+# 长日志只取末尾 N 行，可配合 --clean 去掉 DS 日志前缀
+ds-cli task-instance log <task-instance-id> --tail 100 --clean
 
 # 按 task code 单独读/写一个任务
 ds-cli task-def get <task-code> --project-code <project-code>
