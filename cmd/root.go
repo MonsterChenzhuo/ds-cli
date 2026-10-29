@@ -24,5 +24,6 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newScheduleCmd())
 	root.AddCommand(newAlertCmd())
 	root.AddCommand(newEnvironmentCmd())
+	root.AddCommand(newResourceCmd())
 	return root
 }

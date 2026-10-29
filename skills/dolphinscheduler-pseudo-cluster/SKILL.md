@@ -139,3 +139,7 @@ stdout 只解析 JSON envelope：
 - `summary` 包含 `cluster`、`api_url`、`http_status`。
 - `data` 是 DolphinScheduler API 的原始响应体。
 - stderr 只作为诊断信息，不承载结果数据。
+
+## 资源中心
+
+支持 `resource tree/base-dir/mkdir/upload/list/create-content/view/delete`。先运行 `resource tree --type FILE` 或 `resource base-dir --type FILE` 取得服务器返回的资源路径，创建目录后用 `resource upload <本地文件> --current-dir <远端目录>` 上传原始文件；资源类型为 FILE，不要把目录当成 DIRECTORY 类型。资源上传后还需在 taskParams.resourceList 中绑定到任务。

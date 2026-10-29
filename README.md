@@ -310,6 +310,29 @@ ds-cli environment create python3 \
   --worker-groups default
 ```
 
+### Resource center
+
+Resource paths must come from the server; do not guess the storage URI. `tree` shows
+the server-returned resource tree and `base-dir`
+returns the authenticated user's FILE resource directory. Use it as `--current-dir`.
+
+```bash
+ds-cli resource tree --type FILE
+ds-cli resource base-dir --type FILE
+ds-cli resource mkdir ods_success_monitor --current-dir '<base-dir>'
+ds-cli resource upload ./check_ods_success.py --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource upload ./ods_success_paths.tsv --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource list --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource view '<full-resource-path>' --limit -1
+ds-cli resource create-content check --suffix py --content-file ./check.py --current-dir '<base-dir>'
+ds-cli resource delete '<full-resource-path>'
+```
+
+`upload` uses multipart upload and preserves file bytes (including TSV tabs and Unicode).
+`create-content` uses the online text editor endpoint and appends `.<suffix>` to the name.
+Resource type is `FILE` (or `UDF` where supported); directory creation still uses `FILE`.
+These commands do not attach resources to tasks automatically.
+
 ## For AI Agents
 
 - Do not expect prompts. Provide every input through flags, environment variables, or files.

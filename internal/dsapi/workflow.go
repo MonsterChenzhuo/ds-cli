@@ -22,9 +22,13 @@ type SingleTaskWorkflow struct {
 	// GlobalParams is the workflow-level global params JSON array. Empty means
 	// "[]" (no global params).
 	GlobalParams string
+	Resources    []ResourceReference
 }
 
 func SingleTaskWorkflowForm(in SingleTaskWorkflow) (url.Values, error) {
+	if err := ValidateResourceReferences(in.Resources); err != nil {
+		return nil, err
+	}
 	if in.ProjectCode == 0 {
 		return nil, errors.New("project code is required")
 	}
@@ -71,6 +75,9 @@ func SingleTaskWorkflowForm(in SingleTaskWorkflow) (url.Values, error) {
 		"conditionResult":  map[string]any{"successNode": []any{}, "failedNode": []any{}},
 		"waitStartTimeout": map[string]any{},
 		"switchResult":     map[string]any{},
+	}
+	if in.Resources != nil {
+		taskParams["resourceList"] = in.Resources
 	}
 	tasks := []map[string]any{{
 		"code":                  in.TaskCode,

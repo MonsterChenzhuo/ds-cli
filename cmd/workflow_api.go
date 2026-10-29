@@ -640,11 +640,12 @@ func summarizeWorkflowDetail(body []byte) (map[string]any, error) {
 
 func newWorkflowPatchTaskCmd(flags *apiFlags) *cobra.Command {
 	var projectCode, taskCode int64
-	var rawScript, rawScriptFile string
+	var rawScript, rawScriptFile, resourcesFile string
+	var environmentCode int64
 	var keepOffline bool
 	c := &cobra.Command{
 		Use:   "patch-task <workflow-code>",
-		Short: "Replace one task's rawScript in a workflow definition (offline, update, restore release state).",
+		Short: "Patch a task script, resources, or environment (offline, update, restore release state).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectCode == 0 {
@@ -660,8 +661,20 @@ func newWorkflowPatchTaskCmd(flags *apiFlags) *cobra.Command {
 				}
 				rawScript = string(b)
 			}
-			if rawScript == "" {
-				return fmt.Errorf("--raw-script or --raw-script-file is required")
+			var resources *[]dsapi.ResourceReference
+			if resourcesFile != "" {
+				parsed, err := readResourceReferences(resourcesFile)
+				if err != nil {
+					return err
+				}
+				resources = &parsed
+			}
+			var runtimeEnvironment *int64
+			if cmd.Flags().Changed("environment-code") {
+				runtimeEnvironment = &environmentCode
+			}
+			if rawScript == "" && resources == nil && runtimeEnvironment == nil {
+				return fmt.Errorf("--raw-script/--raw-script-file, --resources-file, or --environment-code is required")
 			}
 			workflowCode, err := int64Arg(args[0], "workflow-code")
 			if err != nil {
@@ -675,11 +688,13 @@ func newWorkflowPatchTaskCmd(flags *apiFlags) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
 			defer cancel()
 			result, err := dsapi.PatchWorkflowTask(ctx, client, dsapi.WorkflowPatchInput{
-				ProjectCode:  projectCode,
-				WorkflowCode: workflowCode,
-				TaskCode:     taskCode,
-				NewRawScript: rawScript,
-				KeepOffline:  keepOffline,
+				ProjectCode:     projectCode,
+				WorkflowCode:    workflowCode,
+				TaskCode:        taskCode,
+				NewRawScript:    rawScript,
+				Resources:       resources,
+				EnvironmentCode: runtimeEnvironment,
+				KeepOffline:     keepOffline,
 			})
 			if err != nil {
 				writeAPIError(cmd, "workflow.patch-task", "DS_API_ERROR", err)
@@ -707,6 +722,8 @@ func newWorkflowPatchTaskCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().Int64Var(&taskCode, "task-code", 0, "Task definition code inside the workflow")
 	c.Flags().StringVar(&rawScript, "raw-script", "", "New rawScript for the task")
 	c.Flags().StringVar(&rawScriptFile, "raw-script-file", "", "Read new rawScript from this file")
+	c.Flags().StringVar(&resourcesFile, "resources-file", "", "Replace resourceList from JSON array of {resourceName}; [] clears it")
+	c.Flags().Int64Var(&environmentCode, "environment-code", 0, "Set the task runtime environment code; omitted preserves it")
 	c.Flags().BoolVar(&keepOffline, "keep-offline", false, "Leave the workflow OFFLINE after update even if it was ONLINE before")
 	return c
 }

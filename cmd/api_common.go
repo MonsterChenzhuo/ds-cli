@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,27 @@ import (
 	"github.com/ds-cli/ds-cli/internal/output"
 	"github.com/spf13/cobra"
 )
+
+func readResourceReferences(file string) ([]dsapi.ResourceReference, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("read --resources-file: %w", err)
+	}
+	var resources []dsapi.ResourceReference
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&resources); err != nil {
+		return nil, fmt.Errorf("parse --resources-file: %w", err)
+	}
+	if resources == nil {
+		return nil, fmt.Errorf("--resources-file must contain an array (use [] to clear resources)")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("--resources-file must contain exactly one JSON array")
+	}
+	return resources, dsapi.ValidateResourceReferences(resources)
+}
 
 type apiFlags struct {
 	Cluster   string

@@ -32,7 +32,7 @@ func newTaskCmd() *cobra.Command {
 func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 	var projectCode, environmentCode int64
 	var workflowName, description, taskType, script, scriptFile, workerGroup string
-	var globalParams, globalParamsFile string
+	var globalParams, globalParamsFile, resourcesFile string
 	c := &cobra.Command{
 		Use:   "create <task-name>",
 		Short: "Create an offline single-task workflow definition.",
@@ -58,6 +58,13 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var resources []dsapi.ResourceReference
+			if resourcesFile != "" {
+				resources, err = readResourceReferences(resourcesFile)
+				if err != nil {
+					return err
+				}
+			}
 			return apiRun(cmd, *flags, "task.create", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
 				code, err := generateTaskCode(ctx, client, projectCode)
 				if err != nil {
@@ -74,6 +81,7 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 					WorkerGroup:     workerGroup,
 					EnvironmentCode: environmentCode,
 					GlobalParams:    gp,
+					Resources:       resources,
 				})
 				if err != nil {
 					return nil, err
@@ -88,6 +96,7 @@ func newTaskCreateCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().StringVar(&taskType, "type", "SHELL", "Task type: SHELL or PYTHON")
 	c.Flags().StringVar(&script, "script", "", "Task raw script")
 	c.Flags().StringVar(&scriptFile, "script-file", "", "Read task raw script from file")
+	c.Flags().StringVar(&resourcesFile, "resources-file", "", "Resource references JSON array of {resourceName}")
 	c.Flags().StringVar(&workerGroup, "worker-group", "default", "Worker group")
 	c.Flags().Int64Var(&environmentCode, "environment-code", 0, "Environment code; 0 means unset")
 	c.Flags().StringVar(&globalParams, "global-params", "", "Global params JSON array")

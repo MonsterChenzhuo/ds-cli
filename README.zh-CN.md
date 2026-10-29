@@ -317,6 +317,24 @@ ds-cli environment create python3 \
 - 单脚本任务优先用 `task create`；只有需要直接操作工作流定义时才用 `workflow`。
 - 失败时读取 `ok`、`error.code`、`error.message`、`summary` 和 `data` 中的 DolphinScheduler 原始响应。
 
+### 资源中心
+
+先查询服务器的资源树和根目录，不要猜测存储 URI。`tree` 返回资源树，`base-dir` 返回当前认证用户的 FILE 资源根目录，再将它传给 `--current-dir`。
+
+```bash
+ds-cli resource tree --type FILE
+ds-cli resource base-dir --type FILE
+ds-cli resource mkdir ods_success_monitor --current-dir '<base-dir>'
+ds-cli resource upload ./check_ods_success.py --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource upload ./ods_success_paths.tsv --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource list --current-dir '<base-dir>/ods_success_monitor'
+ds-cli resource view '<完整资源路径>' --limit -1
+ds-cli resource create-content check --suffix py --content-file ./check.py --current-dir '<base-dir>'
+ds-cli resource delete '<完整资源路径>'
+```
+
+`upload` 使用 multipart 文件上传，保留文件原始字节（包括 TSV 的制表符和中文）。`create-content` 使用在线文本创建接口，自动拼接 `.<suffix>`。资源类型为 `FILE`（或服务端支持的 `UDF`）；创建文件夹仍使用 `FILE`。这些命令不会自动把资源绑定到任务。
+
 ## 输出契约
 
 成功 API 命令：

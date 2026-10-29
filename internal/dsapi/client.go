@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -72,6 +75,39 @@ func (c *Client) Form(ctx context.Context, method, path string, values url.Value
 		return c.do(ctx, method, path, nil, "")
 	}
 	return c.do(ctx, method, path, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+}
+
+// MultipartFile sends a local file to a multipart/form-data endpoint. The
+// caller supplies the ordinary form fields; fileField is the upload field.
+func (c *Client) MultipartFile(ctx context.Context, method, path string, values url.Values, fileField, filePath string) (*Response, error) {
+	if err := c.ensureAuth(ctx); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, items := range values {
+		for _, value := range items {
+			if err := writer.WriteField(key, value); err != nil {
+				return nil, err
+			}
+		}
+	}
+	part, err := writer.CreateFormFile(fileField, filepath.Base(filePath))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return c.do(ctx, method, path, body, writer.FormDataContentType())
 }
 
 // RawGet performs a GET request without DolphinScheduler {code,msg} envelope validation. It is intended

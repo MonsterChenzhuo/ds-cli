@@ -16,6 +16,10 @@ type WorkflowPatchInput struct {
 	WorkflowCode int64
 	TaskCode     int64
 	NewRawScript string
+	// Nil preserves existing resourceList; a non-nil empty slice clears it.
+	Resources *[]ResourceReference
+	// Nil preserves the task runtime environment.
+	EnvironmentCode *int64
 	// KeepOffline, when true, leaves the workflow OFFLINE after the update even if it was ONLINE before.
 	KeepOffline bool
 }
@@ -36,8 +40,13 @@ func PatchWorkflowTask(ctx context.Context, client *Client, in WorkflowPatchInpu
 	if in.ProjectCode == 0 || in.WorkflowCode == 0 || in.TaskCode == 0 {
 		return nil, errors.New("project-code, workflow-code, and task-code are required")
 	}
-	if in.NewRawScript == "" {
-		return nil, errors.New("new rawScript is required")
+	if in.NewRawScript == "" && in.Resources == nil && in.EnvironmentCode == nil {
+		return nil, errors.New("rawScript, resources, or environment-code is required")
+	}
+	if in.Resources != nil {
+		if err := ValidateResourceReferences(*in.Resources); err != nil {
+			return nil, err
+		}
 	}
 
 	getResp, err := client.JSON(ctx, http.MethodGet,
@@ -71,7 +80,15 @@ func PatchWorkflowTask(ctx context.Context, client *Client, in WorkflowPatchInpu
 			if params == nil {
 				params = map[string]any{}
 			}
-			params["rawScript"] = in.NewRawScript
+			if in.NewRawScript != "" {
+				params["rawScript"] = in.NewRawScript
+			}
+			if in.Resources != nil {
+				params["resourceList"] = *in.Resources
+			}
+			if in.EnvironmentCode != nil {
+				t["environmentCode"] = *in.EnvironmentCode
+			}
 			t["taskParams"] = params
 			found = true
 		}
