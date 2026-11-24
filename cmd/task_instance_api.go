@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,7 @@ func newTaskInstanceCmd() *cobra.Command {
 	cmd.AddCommand(newTaskInstanceListCmd(&flags))
 	cmd.AddCommand(newTaskInstanceForceSuccessCmd(&flags))
 	cmd.AddCommand(newTaskInstanceStopCmd(&flags))
+	cmd.AddCommand(newTaskInstanceStopRunningCmd(&flags))
 	cmd.AddCommand(newTaskInstanceLogCmd(&flags))
 	cmd.AddCommand(newTaskInstanceLogDownloadCmd(&flags))
 	return cmd
@@ -39,6 +41,7 @@ func newTaskInstanceListCmd(flags *apiFlags) *cobra.Command {
 	var workflowInstanceName, workflowDefinitionName, taskName, executorName string
 	var stateType, host, startDate, endDate, search, taskExecuteType string
 	var pageNo, pageSize int
+	var all, compact bool
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List task instances in a project.",
@@ -46,29 +49,32 @@ func newTaskInstanceListCmd(flags *apiFlags) *cobra.Command {
 			if projectCode == 0 {
 				return fmt.Errorf("--project-code is required")
 			}
+			if pageNo < 1 || pageSize < 1 {
+				return fmt.Errorf("--page-no and --page-size must be positive")
+			}
+			if all && pageNo != 1 {
+				return fmt.Errorf("--all starts at page 1")
+			}
+			filters := formValues(
+				"searchVal", search,
+				"workflowInstanceName", workflowInstanceName,
+				"workflowDefinitionName", workflowDefinitionName,
+				"taskName", taskName,
+				"executorName", executorName,
+				"stateType", stateType,
+				"host", host,
+				"startDate", startDate,
+				"endDate", endDate,
+				"taskExecuteType", taskExecuteType,
+			)
+			if workflowInstanceID > 0 {
+				filters.Set("workflowInstanceId", strconv.Itoa(workflowInstanceID))
+			}
+			if taskCode != 0 {
+				filters.Set("taskCode", strconv.FormatInt(taskCode, 10))
+			}
 			return apiRun(cmd, *flags, "task-instance.list", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				values := formValues(
-					"searchVal", search,
-					"workflowInstanceName", workflowInstanceName,
-					"workflowDefinitionName", workflowDefinitionName,
-					"taskName", taskName,
-					"executorName", executorName,
-					"stateType", stateType,
-					"host", host,
-					"startDate", startDate,
-					"endDate", endDate,
-					"taskExecuteType", taskExecuteType,
-					"pageNo", strconv.Itoa(pageNo),
-					"pageSize", strconv.Itoa(pageSize),
-				)
-				if workflowInstanceID > 0 {
-					values.Set("workflowInstanceId", strconv.Itoa(workflowInstanceID))
-				}
-				if taskCode != 0 {
-					values.Set("taskCode", strconv.FormatInt(taskCode, 10))
-				}
-				return client.Form(ctx, http.MethodGet,
-					fmt.Sprintf("/projects/%d/task-instances", projectCode), values)
+				return listTaskInstances(ctx, client, projectCode, filters, pageNo, pageSize, all, compact)
 			})
 		},
 	}
@@ -87,7 +93,47 @@ func newTaskInstanceListCmd(flags *apiFlags) *cobra.Command {
 	c.Flags().StringVar(&taskExecuteType, "task-execute-type", "", "Task execute type: BATCH or STREAM")
 	c.Flags().IntVar(&pageNo, "page-no", 1, "Page number")
 	c.Flags().IntVar(&pageSize, "page-size", 20, "Page size")
+	c.Flags().BoolVar(&all, "all", false, "Fetch every page of matching task instances")
+	c.Flags().BoolVar(&compact, "compact", false, "Keep task IDs, workflow IDs, names, states, types, and timestamps")
 	return c
+}
+
+func listTaskInstances(ctx context.Context, client *dsapi.Client, projectCode int64, filters url.Values, pageNo, pageSize int, all, compact bool) (*dsapi.Response, error) {
+	httpStatus := http.StatusOK
+	var page dsapi.TaskInstancePage
+	if all {
+		var err error
+		page, err = dsapi.ListAllTaskInstances(ctx, client, projectCode, filters, pageSize)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		resp, err := dsapi.QueryTaskInstances(ctx, client, projectCode, filters, pageNo, pageSize)
+		if err != nil || !compact {
+			return resp, err
+		}
+		httpStatus = resp.HTTPStatus
+		page, err = dsapi.DecodeTaskInstancePage(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var rows any = page.TotalList
+	if compact {
+		var err error
+		rows, err = dsapi.SummarizeTaskInstances(page.TotalList)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"code": 0, "msg": "success",
+		"data": map[string]any{
+			"total": page.Total, "returned": len(page.TotalList), "totalPage": page.TotalPage,
+			"currentPage": pageNo, "pageSize": pageSize, "totalList": rows,
+		},
+	})
+	return &dsapi.Response{HTTPStatus: httpStatus, Body: body}, err
 }
 
 func newTaskInstanceForceSuccessCmd(flags *apiFlags) *cobra.Command {
@@ -116,26 +162,82 @@ func newTaskInstanceForceSuccessCmd(flags *apiFlags) *cobra.Command {
 
 func newTaskInstanceStopCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
+	var workflowInstanceID int
 	c := &cobra.Command{
 		Use:   "stop <task-instance-id>",
 		Short: "Stop a stream task instance.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Stop a STREAM task after checking that it belongs to the project. " +
+			"Pass --workflow-instance-id if the task is listed in a workflow instance. " +
+			"For BATCH tasks, use workflow-instance control --type STOP.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if projectCode == 0 {
-				return fmt.Errorf("--project-code is required")
+			if projectCode <= 0 {
+				return fmt.Errorf("--project-code must be positive")
+			}
+			if cmd.Flags().Changed("workflow-instance-id") && workflowInstanceID <= 0 {
+				return fmt.Errorf("--workflow-instance-id must be positive")
 			}
 			id, err := intArg(args[0], "task-instance-id")
 			if err != nil {
 				return err
 			}
+			if id <= 0 {
+				return fmt.Errorf("task-instance-id must be positive")
+			}
 			return apiRun(cmd, *flags, "task-instance.stop", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.Form(ctx, http.MethodPost,
-					fmt.Sprintf("/projects/%d/task-instances/%d/stop", projectCode, id), nil)
+				if err := validateStreamTaskInstance(ctx, client, projectCode, workflowInstanceID, id); err != nil {
+					return nil, err
+				}
+				return dsapi.StopStreamTaskInstance(ctx, client, projectCode, id)
 			})
 		},
 	}
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
+	c.Flags().IntVar(&workflowInstanceID, "workflow-instance-id", 0, "Workflow instance ID, when the task belongs to one")
 	return c
+}
+
+func validateStreamTaskInstance(ctx context.Context, client *dsapi.Client, projectCode int64, workflowInstanceID, taskInstanceID int) error {
+	if workflowInstanceID == 0 {
+		filters := formValues("stateType", runningTaskState)
+		rows, _, err := runningTasksOfType(ctx, client, projectCode, filters, "STREAM")
+		if err != nil {
+			return err
+		}
+		for _, task := range rows {
+			if task.ID == taskInstanceID && task.State == runningTaskState && task.TaskExecuteType == "STREAM" {
+				return nil
+			}
+		}
+		return fmt.Errorf("task instance %d is not a running STREAM task in project %d; use workflow-instance control --type STOP for BATCH tasks", taskInstanceID, projectCode)
+	}
+	resp, err := client.Form(ctx, http.MethodGet,
+		fmt.Sprintf("/projects/%d/workflow-instances/%d/tasks", projectCode, workflowInstanceID), nil)
+	if err != nil {
+		return err
+	}
+	var body struct {
+		Data struct {
+			TaskList []struct {
+				ID              int    `json:"id"`
+				TaskExecuteType string `json:"taskExecuteType"`
+				TaskType        string `json:"taskType"`
+			} `json:"taskList"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		return fmt.Errorf("decode workflow task list: %w", err)
+	}
+	for _, task := range body.Data.TaskList {
+		if task.ID != taskInstanceID {
+			continue
+		}
+		if strings.EqualFold(task.TaskExecuteType, "STREAM") {
+			return nil
+		}
+		return fmt.Errorf("task instance %d is %s/%s, and DolphinScheduler 3.4.1 only supports task-instance stop for STREAM tasks; use workflow-instance control %d --project-code %d --type STOP --wait", taskInstanceID, task.TaskType, task.TaskExecuteType, workflowInstanceID, projectCode)
+	}
+	return fmt.Errorf("task instance %d was not found in workflow instance %d", taskInstanceID, workflowInstanceID)
 }
 
 func newTaskInstanceLogCmd(flags *apiFlags) *cobra.Command {

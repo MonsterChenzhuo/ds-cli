@@ -20,6 +20,8 @@ type Client struct {
 	http    *http.Client
 }
 
+const userAgent = "ds-cli/0.1"
+
 type Response struct {
 	HTTPStatus int             `json:"http_status"`
 	Body       json.RawMessage `json:"body"`
@@ -38,8 +40,23 @@ func NewClient(profile Profile) *Client {
 
 func NormalizeBaseURL(raw string) string {
 	s := strings.TrimRight(strings.TrimSpace(raw), "/")
-	s = strings.TrimSuffix(s, "/ui")
-	return strings.TrimRight(s, "/")
+	parsed, err := url.Parse(s)
+	if err != nil {
+		return strings.TrimSuffix(s, "/ui")
+	}
+	path := strings.TrimRight(parsed.EscapedPath(), "/")
+	base, uiPath, found := strings.Cut(path, "/ui/")
+	if !found && strings.HasSuffix(path, "/ui") {
+		base, found = strings.TrimSuffix(path, "/ui"), true
+	}
+	if found && (uiPath == "" || uiPath == "projects" || strings.HasPrefix(uiPath, "projects/")) {
+		parsed.Path, _ = url.PathUnescape(strings.TrimRight(base, "/"))
+		parsed.RawPath = strings.TrimRight(base, "/")
+		parsed.RawQuery, parsed.Fragment, parsed.RawFragment = "", "", ""
+		parsed.ForceQuery = false
+		return parsed.String()
+	}
+	return s
 }
 
 func (c *Client) JSON(ctx context.Context, method, path string, body any) (*Response, error) {
@@ -213,6 +230,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

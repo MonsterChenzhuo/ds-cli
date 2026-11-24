@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ds-cli/ds-cli/internal/dsapi"
 	"github.com/ds-cli/ds-cli/internal/output"
@@ -216,10 +218,15 @@ var workflowInstanceControlMap = map[string]string{
 func newWorkflowInstanceControlCmd(flags *apiFlags) *cobra.Command {
 	var projectCode int64
 	var action string
+	var wait bool
+	var waitTimeout, pollInterval time.Duration
 	c := &cobra.Command{
 		Use:   "control <instance-id>",
 		Short: "Control a workflow instance: STOP, PAUSE, RESUME, RERUN, RECOVER-FAILED.",
-		Args:  cobra.ExactArgs(1),
+		Long: "control sends the requested workflow action. With --wait, STOP waits until the\n" +
+			"workflow reaches STOP, which is useful because DolphinScheduler accepts the stop\n" +
+			"request before Master and Worker finish killing active tasks.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectCode == 0 {
 				return fmt.Errorf("--project-code is required")
@@ -232,17 +239,93 @@ func newWorkflowInstanceControlCmd(flags *apiFlags) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("--type must be one of STOP, PAUSE, RESUME, RERUN, RECOVER-FAILED")
 			}
-			return apiRun(cmd, *flags, "workflow-instance.control", func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
-				return client.Form(ctx, http.MethodPost,
-					fmt.Sprintf("/projects/%d/executors/execute", projectCode),
-					formValues("workflowInstanceId", strconv.Itoa(id), "executeType", executeType))
-			})
+			if wait && waitTimeout <= 0 {
+				return fmt.Errorf("--wait-timeout must be greater than zero")
+			}
+			if wait && pollInterval <= 0 {
+				return fmt.Errorf("--poll-interval must be greater than zero")
+			}
+			if wait && executeType != "STOP" {
+				return fmt.Errorf("--wait is supported for STOP")
+			}
+			run := func(ctx context.Context, client *dsapi.Client) (*dsapi.Response, error) {
+				if wait {
+					resp, state, err := getWorkflowInstanceState(ctx, client, projectCode, id)
+					if err != nil || state == "STOP" {
+						return resp, err
+					}
+					if state == "READY_STOP" {
+						return waitForWorkflowInstanceStop(ctx, client, projectCode, id, pollInterval)
+					}
+				}
+				resp, err := controlWorkflowInstance(ctx, client, projectCode, id, executeType)
+				if err != nil || !wait {
+					return resp, err
+				}
+				return waitForWorkflowInstanceStop(ctx, client, projectCode, id, pollInterval)
+			}
+			if wait {
+				return apiRunWithTimeout(cmd, *flags, "workflow-instance.control", waitTimeout, run)
+			}
+			return apiRun(cmd, *flags, "workflow-instance.control", run)
 		},
 	}
 	c.Flags().Int64Var(&projectCode, "project-code", 0, "Project code")
 	c.Flags().StringVar(&action, "type", "", "Action: STOP, PAUSE, RESUME, RERUN, RECOVER-FAILED")
+	c.Flags().BoolVar(&wait, "wait", false, "For STOP, wait until the workflow reaches STOP")
+	c.Flags().DurationVar(&waitTimeout, "wait-timeout", 2*time.Minute, "Maximum time to wait for STOP")
+	c.Flags().DurationVar(&pollInterval, "poll-interval", 2*time.Second, "State polling interval when --wait is set")
 	_ = c.MarkFlagRequired("type")
 	return c
+}
+
+func controlWorkflowInstance(ctx context.Context, client *dsapi.Client, projectCode int64, instanceID int, action string) (*dsapi.Response, error) {
+	return client.Form(ctx, http.MethodPost, fmt.Sprintf("/projects/%d/executors/execute", projectCode),
+		formValues("workflowInstanceId", strconv.Itoa(instanceID), "executeType", action))
+}
+
+func getWorkflowInstanceState(ctx context.Context, client *dsapi.Client, projectCode int64, instanceID int) (*dsapi.Response, string, error) {
+	resp, err := client.Form(ctx, http.MethodGet, fmt.Sprintf("/projects/%d/workflow-instances/%d", projectCode, instanceID), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	var body struct {
+		Data struct {
+			State string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		return nil, "", fmt.Errorf("decode workflow instance state: %w", err)
+	}
+	state := strings.ToUpper(body.Data.State)
+	if state == "" {
+		return nil, "", fmt.Errorf("workflow instance %d response has no state", instanceID)
+	}
+	return resp, state, nil
+}
+
+func waitForWorkflowInstanceStop(ctx context.Context, client *dsapi.Client, projectCode int64, instanceID int, pollInterval time.Duration) (*dsapi.Response, error) {
+	var lastState string
+	for {
+		resp, state, err := getWorkflowInstanceState(ctx, client, projectCode, instanceID)
+		if err != nil {
+			return nil, fmt.Errorf("verify STOP for workflow instance %d (last state %q): %w", instanceID, lastState, err)
+		}
+		switch state {
+		case "STOP":
+			return resp, nil
+		case "SUCCESS", "FAILURE", "PAUSE":
+			return nil, fmt.Errorf("workflow instance %d reached %s while waiting for STOP", instanceID, state)
+		}
+		lastState = state
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("waiting for workflow instance %d to reach STOP (last state %s): %w", instanceID, lastState, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 func newWorkflowInstanceDeleteCmd(flags *apiFlags) *cobra.Command {

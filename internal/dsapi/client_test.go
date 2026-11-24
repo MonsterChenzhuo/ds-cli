@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestNormalizeBaseURLWithProjectLink(t *testing.T) {
+	const base = "https://example.com/dolphinscheduler"
+	for _, input := range []string{
+		base,
+		base + "/ui/",
+		base + "/ui/#/projects/42/task-instance",
+		base + "/ui/projects/42/workflow-definition?projectName=demo",
+	} {
+		if got := NormalizeBaseURL(input); got != base {
+			t.Errorf("NormalizeBaseURL(%q) = %q, want %q", input, got, base)
+		}
+	}
+}
+
 func TestClientLogsInWithPasswordAndSendsSessionHeader(t *testing.T) {
 	var sawSession string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,12 +61,13 @@ func TestClientLogsInWithPasswordAndSendsSessionHeader(t *testing.T) {
 }
 
 func TestClientPrefersTokenWithoutLogin(t *testing.T) {
-	var sawToken string
+	var sawToken, sawUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/dolphinscheduler/login" {
 			t.Fatal("login should not be called when token is configured")
 		}
 		sawToken = r.Header.Get("token")
+		sawUserAgent = r.Header.Get("User-Agent")
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"ok": true}})
 	}))
 	defer server.Close()
@@ -66,5 +81,8 @@ func TestClientPrefersTokenWithoutLogin(t *testing.T) {
 	}
 	if sawToken != "token-abc" {
 		t.Fatalf("token header = %q, want token-abc", sawToken)
+	}
+	if sawUserAgent != userAgent {
+		t.Fatalf("user-agent = %q, want %q", sawUserAgent, userAgent)
 	}
 }

@@ -131,7 +131,7 @@ ds-cli project list
 | `ds-cli workflow patch-task` | 替换多任务工作流中某个 task 的 `rawScript`（自动 offline → 更新 → 恢复 release 状态） |
 | `ds-cli workflow start` | 通过 `/executors/start-workflow-instance` 立即触发一次工作流，也支持显式日期列表/日期范围补数 |
 | `ds-cli workflow-instance list/backfill-status/get/tasks/control/delete` | 查询、核对和控制工作流实例；`backfill-status` 检查补数日期是否漏跑 |
-| `ds-cli task-instance list/log/log-download/force-success/stop` | 查询任务实例并拉取 worker 日志（`log --full` 取全量日志，`log-download` 直接落盘） |
+| `ds-cli task-instance list/log/log-download/force-success/stop/stop-running` | 查询任务实例并拉取 worker 日志（`log --full` 取全量日志，`log-download` 直接落盘） |
 | `ds-cli task-def get/update` | 按 code 单独读取或更新一个任务定义（使用 `with-upstream` 接口） |
 | `ds-cli task create/online/offline/delete/get/list` | 创建和操作单任务工作流 |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | 管理工作流调度 |
@@ -260,8 +260,13 @@ ds-cli workflow-instance list --project-code <project-code> --workflow-code <wor
 ds-cli workflow-instance get <instance-id> --project-code <project-code>
 ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+# 等待 Master/Worker 完成异步停止传播：
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP --wait
 
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance list --project-code <project-code> --state-type RUNNING_EXECUTION --all --compact
+ds-cli task-instance stop-running --project-code <project-code> --dry-run
+ds-cli task-instance stop-running --project-code <project-code> --wait
 
 # 取一页日志（直接透传 envelope）：
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
@@ -274,7 +279,13 @@ ds-cli task-instance log <task-instance-id> --tail 100 --clean
 ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
+# 停止独立运行的 STREAM 任务。BATCH 通过工作流实例停止。
+ds-cli task-instance stop <task-instance-id> --project-code <project-code>
 ```
+
+DolphinScheduler 3.4.1 的任务列表默认查询 BATCH。查询流任务时传 `--task-execute-type STREAM`。`stop-running` 会检查两种任务类型，每个批任务所属工作流只提交一次停止请求。工作流停止也会影响该实例中的其他任务。用 `--workflow-instance-id` 可限定到单个工作流实例。默认返回请求结果，传 `--wait` 会处理等待期间新进入运行状态的匹配任务，连续 90 秒无运行任务后复查队列。默认最多等待 30 分钟，可分别用 `--quiet-period` 和 `--wait-timeout` 调整。失败或超时时，JSON envelope 保留最后一次查询和各目标结果。
+
+`--api-url` 可直接使用 DolphinScheduler 项目页面链接，项目编号通过 `--project-code` 传入。
 
 ### 按 code 单独管理 task
 

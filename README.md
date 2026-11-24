@@ -131,7 +131,7 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 | `ds-cli workflow patch-task` | Swap one task's `rawScript` in a multi-task workflow (offline → update → restore release state) |
 | `ds-cli workflow start` | Trigger one workflow run or a date-list/date-range backfill via `/executors/start-workflow-instance` |
 | `ds-cli workflow-instance list/backfill-status/get/tasks/control/delete` | Inspect, validate backfill coverage, and control workflow instances |
-| `ds-cli task-instance list/log/log-download/force-success/stop` | Inspect task instances and pull worker logs (`log --full` for the whole log, `log-download` saves to a file) |
+| `ds-cli task-instance list/log/log-download/force-success/stop/stop-running` | Inspect task instances and pull worker logs (`log --full` for the whole log, `log-download` saves to a file) |
 | `ds-cli task-def get/update` | Read or update a single task definition by code (uses `with-upstream`) |
 | `ds-cli task create/online/offline/delete/get/list` | Create and operate single-task workflows |
 | `ds-cli schedule create/update/get/list/online/offline/delete` | Manage workflow schedules |
@@ -262,8 +262,13 @@ ds-cli workflow-instance list --project-code <project-code> --workflow-code <wor
 ds-cli workflow-instance get <instance-id> --project-code <project-code>
 ds-cli workflow-instance tasks <instance-id> --project-code <project-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+# Wait until Master/Worker finish asynchronous stop propagation:
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP --wait
 
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance list --project-code <project-code> --state-type RUNNING_EXECUTION --all --compact
+ds-cli task-instance stop-running --project-code <project-code> --dry-run
+ds-cli task-instance stop-running --project-code <project-code> --wait
 
 # One page of the log (envelope passthrough):
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
@@ -276,7 +281,13 @@ ds-cli task-instance log <task-instance-id> --tail 100 --clean
 ds-cli task-instance log-download <task-instance-id>
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-instance force-success <task-instance-id> --project-code <project-code>
+# Stop a standalone STREAM task. For BATCH, use workflow-instance control.
+ds-cli task-instance stop <task-instance-id> --project-code <project-code>
 ```
+
+DolphinScheduler 3.4.1 lists BATCH tasks by default. Pass `--task-execute-type STREAM` to list streams. `stop-running` scans both types and stops each BATCH parent workflow once, which can also cancel other tasks in that workflow. For a single workflow, pass `--workflow-instance-id`. Without `--wait`, the command reports request outcomes. With `--wait`, it handles new running matches for up to 30 minutes by default and checks for queued tasks after a 90-second quiet period. Use `--wait-timeout` and `--quiet-period` to adjust those durations. On error or timeout, the JSON envelope includes the last scan and per-target results.
+
+A DolphinScheduler project UI link works as `--api-url`. Pass the project code separately.
 
 ### Task definitions by code
 

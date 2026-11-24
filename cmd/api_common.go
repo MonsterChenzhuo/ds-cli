@@ -84,7 +84,8 @@ func writeDataEnvelope(cmd *cobra.Command, command string, data any) error {
 func writeAPIResponse(cmd *cobra.Command, command string, profile dsapi.Profile, resp *dsapi.Response) error {
 	var body any
 	if len(resp.Body) > 0 {
-		if err := json.Unmarshal(resp.Body, &body); err != nil {
+		body = resp.Body
+		if !json.Valid(resp.Body) {
 			body = string(resp.Body)
 		}
 	}
@@ -109,7 +110,20 @@ func apiRun(cmd *cobra.Command, flags apiFlags, command string, run func(context
 		writeAPIError(cmd, command, "CONFIG_ERROR", err)
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), profile.Timeout)
+	return apiRunWithClient(cmd, command, client, profile, profile.Timeout, run)
+}
+
+func apiRunWithTimeout(cmd *cobra.Command, flags apiFlags, command string, timeout time.Duration, run func(context.Context, *dsapi.Client) (*dsapi.Response, error)) error {
+	client, profile, err := apiClient(flags)
+	if err != nil {
+		writeAPIError(cmd, command, "CONFIG_ERROR", err)
+		return err
+	}
+	return apiRunWithClient(cmd, command, client, profile, timeout, run)
+}
+
+func apiRunWithClient(cmd *cobra.Command, command string, client *dsapi.Client, profile dsapi.Profile, timeout time.Duration, run func(context.Context, *dsapi.Client) (*dsapi.Response, error)) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 	resp, err := run(ctx, client)
 	if err != nil {

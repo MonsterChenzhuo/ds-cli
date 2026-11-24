@@ -106,10 +106,17 @@ ds-cli workflow-instance backfill-status \
 # 实例与日志
 ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+# 等待停止真正收敛到 STOP，再继续后续操作
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP --wait
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance list --project-code <project-code> --state-type RUNNING_EXECUTION --all --compact
+ds-cli task-instance stop-running --project-code <project-code> --dry-run
+ds-cli task-instance stop-running --project-code <project-code> --wait
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 ds-cli task-instance log <task-instance-id> --tail 100 --clean
+# 停止独立运行的 STREAM 任务。BATCH 通过工作流实例停止。
+ds-cli task-instance stop <task-instance-id> --project-code <project-code>
 
 # 按 task code 单独读/写
 ds-cli task-def get <task-code> --project-code <project-code>
@@ -130,6 +137,8 @@ ds-cli alert group create ops --alert-instance-ids 1,2
 ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/python3"
 ```
 
+用户要求停止项目内正在运行的任务时，使用 `task-instance stop-running --wait`。如需先查看目标，使用 `--dry-run`。命令会分别检查 STREAM 和 BATCH，批任务通过所属工作流停止，也会影响该工作流的其他任务。核对 JSON 的 `verified`、`remaining` 和各目标状态。任务列表默认查询 BATCH，查看流任务时加 `--task-execute-type STREAM`。用户给出项目页面链接时，可直接传给 `--api-url`，并通过 `--project-code` 传入链接中的项目编号。
+
 ## 输出契约
 
 stdout 只解析 JSON envelope：
@@ -137,7 +146,7 @@ stdout 只解析 JSON envelope：
 - `ok: true` 表示命令成功。
 - `ok: false` 时读取 `error.code`、`error.message`。
 - `summary` 包含 `cluster`、`api_url`、`http_status`。
-- `data` 是 DolphinScheduler API 的原始响应体。
+- `data` 包含 DolphinScheduler 响应或 CLI 汇总结果。
 - stderr 只作为诊断信息，不承载结果数据。
 
 ## 资源中心

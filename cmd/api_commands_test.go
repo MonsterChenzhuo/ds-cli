@@ -571,6 +571,73 @@ func TestWorkflowInstanceControlMapsResumeToRecoverSuspended(t *testing.T) {
 	}
 }
 
+func TestWorkflowInstanceControlWaitsForStop(t *testing.T) {
+	var controlCalls, getCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dolphinscheduler/projects/42/executors/execute":
+			controlCalls++
+			if r.Method != http.MethodPost {
+				t.Fatalf("control method = %s", r.Method)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": nil})
+		case "/dolphinscheduler/projects/42/workflow-instances/4350":
+			getCalls++
+			state := "RUNNING_EXECUTION"
+			if getCalls == 2 {
+				state = "READY_STOP"
+			}
+			if getCalls > 2 {
+				state = "STOP"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"state": state}})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	out, err := executeRoot(t, "workflow-instance", "control", "4350",
+		"--project-code", "42", "--type", "STOP", "--wait", "--wait-timeout", "1s", "--poll-interval", "1ms")
+	if err != nil {
+		t.Fatalf("workflow-instance control --wait: %v", err)
+	}
+	if controlCalls != 1 || getCalls < 3 {
+		t.Fatalf("control calls = %d, state calls = %d", controlCalls, getCalls)
+	}
+	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, `"state": "STOP"`) {
+		t.Fatalf("unexpected stdout:\n%s", out)
+	}
+}
+
+func TestTaskInstanceStopRejectsBatchTaskWhenWorkflowInstanceProvided(t *testing.T) {
+	var stopCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dolphinscheduler/projects/42/workflow-instances/4350/tasks":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"taskList": []map[string]any{{"id": 11840, "taskType": "SQL", "taskExecuteType": "BATCH"}},
+			}})
+		case "/dolphinscheduler/projects/42/task-instances/11840/stop":
+			stopCalled = true
+			t.Fatal("batch task stop endpoint must not be called")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("DSCLI_API_URL", server.URL+"/dolphinscheduler")
+	t.Setenv("DSCLI_TOKEN", "tok")
+	out, err := executeRoot(t, "task-instance", "stop", "11840", "--project-code", "42", "--workflow-instance-id", "4350")
+	if err == nil || stopCalled {
+		t.Fatalf("expected local validation error, err=%v stopCalled=%v", err, stopCalled)
+	}
+	if !strings.Contains(out, "only supports task-instance stop for STREAM tasks") || !strings.Contains(out, "workflow-instance control") {
+		t.Fatalf("unexpected error envelope:\n%s", out)
+	}
+}
+
 func TestTaskInstanceLogHitsDetailEndpoint(t *testing.T) {
 	var sawQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

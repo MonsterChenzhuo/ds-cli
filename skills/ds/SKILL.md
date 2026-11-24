@@ -22,7 +22,7 @@ description: 使用 ds-cli 通过 DolphinScheduler REST API 管理已有 DS 集�
    - 改某 task 脚本（一键 offline→update→恢复 release）：`workflow patch-task`
    - 立即触发一次工作流或补数：`workflow start`
    - 工作流实例：`workflow-instance list/backfill-status/get/tasks/control/delete`
-   - 任务实例与日志：`task-instance list/log/log-download/force-success/stop`
+   - 任务实例与日志：`task-instance list/log/log-download/force-success/stop/stop-running`
    - 任务定义（按 task code）：`task-def get/update`
    - 调度：`schedule create/update/get/list/online/offline/delete`
    - 告警组：`alert group create/update/list/delete`
@@ -109,11 +109,18 @@ ds-cli workflow-instance backfill-status \
 # 查实例、控制实例、查任务、拉日志
 ds-cli workflow-instance list --project-code <project-code> --workflow-code <workflow-code>
 ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP
+# 等待停止真正收敛到 STOP，再继续后续操作
+ds-cli workflow-instance control <instance-id> --project-code <project-code> --type STOP --wait
 ds-cli task-instance list --project-code <project-code> --workflow-instance-id <instance-id>
+ds-cli task-instance list --project-code <project-code> --state-type RUNNING_EXECUTION --all --compact
+ds-cli task-instance stop-running --project-code <project-code> --dry-run
+ds-cli task-instance stop-running --project-code <project-code> --wait
 ds-cli task-instance log <task-instance-id> --skip-line-num 0 --limit 500
 ds-cli task-instance log-download <task-instance-id> --output ./ti.log
 # 长日志只取末尾 N 行，可配合 --clean 去掉 DS 日志前缀
 ds-cli task-instance log <task-instance-id> --tail 100 --clean
+# 停止独立运行的 STREAM 任务。BATCH 通过工作流实例停止。
+ds-cli task-instance stop <task-instance-id> --project-code <project-code>
 
 # 按 task code 单独读/写一个任务
 ds-cli task-def get <task-code> --project-code <project-code>
@@ -144,6 +151,8 @@ ds-cli environment create python3 --env-config "export PYTHON_LAUNCHER=/usr/bin/
 > **`delete`/`get` 需要 `--project-code`**：`workflow get`、`workflow delete`、`task get`、`task delete` 走项目内旧端点 `/projects/{projectCode}/workflow-definition/{code}`，因此都必须带 `--project-code`。不要依赖 `/v2/workflows/{code}` open-api——部分 DS 部署把该前缀路由到前端页面，会返回 HTML 而非 JSON。
 
 > **`workflow create-dag` 建多任务 DAG**：需要建带依赖的多任务工作流时用它，不要手拼 `taskDefinitionJson`。`--file` 指向一个 JSON：顶层 `name`/`description`/`executionType`/`releaseState`（`ONLINE` 则创建后自动上线）/`environmentCode`/`workerGroup`/`globalParams`（数组，写文件里天然规避 `$[...]` 被 shell 吞）/`tasks`。每个 task：`name`（唯一）、`type`（SHELL/PYTHON）、`script` 或 `scriptFile`（二选一，`scriptFile` 相对 DAG 文件目录）、`deps`（上游 task 名数组，空=根节点）、可选 `failRetryTimes`/`failRetryInterval`/`environmentCode`/`workerGroup`。CLI 自动按 ≤100 一批生成 task code、解析依赖成关系、布局节点；本地先校验（重名/依赖不存在/自依赖/成环），坏 DAG 联网前即报错。返回 envelope 的 summary 含 `workflow_code`、`task_codes`、`final_release_state`。JSON 字段有拼写错误会因严格解析直接报错。
+
+用户要求停止项目内正在运行的任务时，使用 `task-instance stop-running --wait`。如需先查看目标，使用 `--dry-run`。命令会分别检查 STREAM 和 BATCH，批任务通过所属工作流停止，也会影响该工作流的其他任务。核对 JSON 的 `verified`、`remaining` 和各目标状态。任务列表默认查询 BATCH，查看流任务时加 `--task-execute-type STREAM`。用户给出项目页面链接时，可直接传给 `--api-url`，并通过 `--project-code` 传入链接中的项目编号。
 
 ## 结果判断
 
