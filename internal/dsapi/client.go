@@ -152,20 +152,7 @@ func (c *Client) RawGet(ctx context.Context, path string, values url.Values) (*R
 	} else if c.profile.SessionID != "" {
 		req.Header.Set("sessionId", c.profile.SessionID)
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	out := &Response{HTTPStatus: resp.StatusCode, Body: json.RawMessage(b)}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return out, fmt.Errorf("dolphinscheduler api returned HTTP %d: %s", resp.StatusCode, trimBody(b))
-	}
-	return out, nil
+	return c.readResponse(req)
 }
 
 func (c *Client) ensureAuth(ctx context.Context) error {
@@ -238,21 +225,40 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 }
 
 func (c *Client) roundTrip(req *http.Request) (*Response, error) {
+	out, err := c.readResponse(req)
+	if err != nil {
+		return out, err
+	}
+	return out, checkResultCode(out.Body)
+}
+
+func (c *Client) readResponse(req *http.Request) (*Response, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	out := &Response{HTTPStatus: resp.StatusCode}
+	rayID := strings.TrimSpace(resp.Header.Get("CF-Ray"))
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("CF-Mitigated")), "challenge") {
+		if rayID != "" {
+			return out, fmt.Errorf("Cloudflare challenge (HTTP %d, Ray ID %q)", resp.StatusCode, rayID)
+		}
+		return out, fmt.Errorf("Cloudflare challenge (HTTP %d)", resp.StatusCode)
+	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	out := &Response{HTTPStatus: resp.StatusCode, Body: json.RawMessage(b)}
+	out.Body = json.RawMessage(b)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if rayID != "" && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) {
+			if json.Valid(b) {
+				return out, fmt.Errorf("request returned HTTP %d via Cloudflare (Ray ID %q): %s", resp.StatusCode, rayID, trimBody(b))
+			}
+			return out, fmt.Errorf("request returned HTTP %d via Cloudflare (Ray ID %q)", resp.StatusCode, rayID)
+		}
 		return out, fmt.Errorf("dolphinscheduler api returned HTTP %d: %s", resp.StatusCode, trimBody(b))
-	}
-	if err := checkResultCode(b); err != nil {
-		return out, err
 	}
 	return out, nil
 }

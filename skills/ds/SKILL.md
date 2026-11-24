@@ -57,6 +57,10 @@ ds-cli project list
 
 优先级：`--cluster` -> `DSCLI_CLUSTER` -> `active_cluster`；认证优先级为 token、sessionId、用户名密码。
 
+## 印尼集群的 Cloudflare 访问
+
+`dolphinscheduler.rupiahcepatweb.com` 的 REST API 基址是 `https://dolphinscheduler.rupiahcepatweb.com/dolphinscheduler`。遇到 `Cloudflare challenge` 或带 Ray ID 的 HTTP 403/429 时，保留状态码、Ray ID、请求时间和 API 路径，交给 Cloudflare 管理员在 Security Events 中核对。管理员可为该 API 路径配置受信调用方的访问策略，或提供获准用于自动化的 API 入口。访问成功后仍使用 DolphinScheduler 的认证凭据。
+
 ## 常用命令
 
 ```bash

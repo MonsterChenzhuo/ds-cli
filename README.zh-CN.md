@@ -141,6 +141,8 @@ ds-cli project list
 
 API 命令组通用 flag：`--cluster`、`--api-url`、`--user`、`--password`、`--token`、`--session-id`、`--api-timeout`。
 
+Cloudflare 代理的 API 返回 challenge 或带 Ray ID 的 HTTP 403/429 时，CLI 会在错误中保留状态码和可用的 Ray ID。Cloudflare 管理员可用这些信息、请求时间和 API 路径在 Security Events 中定位请求，并为受信调用方配置 API 访问策略。
+
 ### 项目
 
 ```bash

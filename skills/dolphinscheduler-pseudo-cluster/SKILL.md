@@ -58,6 +58,10 @@ ds-cli project list
 7. 需要定时运行时，使用 `schedule create`（默认 timezone=UTC，必须传 `--environment-code` 和 `--project-code`；目标 workflow 需先 ONLINE）。DS 3.4.1 无 `/v2` open-api：`workflow get/delete/update`、`task get/delete`、`schedule create/update/get/delete` 都要带 `--project-code`；`workflow create`（空 workflow）无法创建，请改用 `workflow create-dag` 或 `task create`。
 8. 告警组使用 `alert group`，运行环境使用 `environment`。
 
+## 印尼集群的 Cloudflare 访问
+
+`dolphinscheduler.rupiahcepatweb.com` 的 REST API 基址是 `https://dolphinscheduler.rupiahcepatweb.com/dolphinscheduler`。遇到 `Cloudflare challenge` 或带 Ray ID 的 HTTP 403/429 时，保留状态码、Ray ID、请求时间和 API 路径，交给 Cloudflare 管理员在 Security Events 中核对。管理员可为该 API 路径配置受信调用方的访问策略，或提供获准用于自动化的 API 入口。访问成功后仍使用 DolphinScheduler 的认证凭据。
+
 ## 常用命令
 
 ```bash

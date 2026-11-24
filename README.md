@@ -141,6 +141,8 @@ Password login calls `/login` first and then reuses the returned `sessionId`.
 
 Common API flags are available on API command groups: `--cluster`, `--api-url`, `--user`, `--password`, `--token`, `--session-id`, and `--api-timeout`.
 
+For an API behind Cloudflare, the CLI reports challenges and includes the Ray ID when available. It also reports the Ray ID for proxied HTTP 403 and 429 responses. Share the status, Ray ID, request time, and API path with the Cloudflare administrator to identify the matching Security Event and configure access for trusted API clients.
+
 ### Projects
 
 ```bash
